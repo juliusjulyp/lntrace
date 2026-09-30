@@ -1,0 +1,9 @@
+[package]
+name = "lntrace-explain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BOLT 4 failure decoding with plain-language explanations"
+
+[dependencies]
+serde = { workspace = true }

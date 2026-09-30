@@ -1,0 +1,23 @@
+# Build artifacts
+/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+
+# Docker volumes (local state)
+lab/*-data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug logs from lab runs
+*.log

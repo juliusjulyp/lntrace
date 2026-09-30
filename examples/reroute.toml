@@ -1,0 +1,37 @@
+# Example scenario: payment reroutes after channel drain.
+#
+# Network:  A:cln → B:ldk → C:ldk → D:ldk
+#                  ↘ B:ldk → D:ldk ↗
+#
+# 1. Pay A→D: routes via B→C→D (cheapest path).
+# 2. Drain B→C channel.
+# 3. Pay A→D again: reroutes via B→D (only viable path).
+
+[network]
+nodes    = ["A:cln", "B:ldk", "C:ldk", "D:ldk"]
+channels = ["A-B:1_000_000", "B-C:500_000", "C-D:1_000_000", "B-D:200_000"]
+
+[[step]]
+action = "pay"
+from   = "A"
+to     = "D"
+amount_sat = 50_000
+
+[step.expect]
+outcome = "success"
+via     = ["B", "C"]
+
+[[step]]
+action  = "drain"
+channel = "B-C"
+leave_sat = 1_000
+
+[[step]]
+action = "pay"
+from   = "A"
+to     = "D"
+amount_sat = 50_000
+
+[step.expect]
+outcome = "success"
+via     = ["B"]

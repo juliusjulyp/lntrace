@@ -1,0 +1,18 @@
+# Multi-stage build: compile lntrace CLN plugins on Debian Bookworm
+# (same glibc as polarlightning/clightning:25.12)
+
+FROM rust:1-bookworm AS builder
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+COPY crates/ crates/
+COPY adapters/ adapters/
+
+# Build both plugin binaries
+RUN cargo build -p lntrace-cln --bin lntrace-cln-recorder --bin lntrace-cln --release
+
+# Output: the two binaries in /build/target/release/
+# Consumed by docker-compose volume mount from the builder stage.
+FROM debian:bookworm-slim
+COPY --from=builder /build/target/release/lntrace-cln-recorder /plugins/lntrace-cln-recorder
+COPY --from=builder /build/target/release/lntrace-cln /plugins/lntrace-cln
