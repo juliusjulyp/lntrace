@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lntrace</title>
+<script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base@2/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base@2/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose@2/cytoscape-fcose.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: #0d1117; color: #c9d1d9; display: flex; height: 100vh; }
+#sidebar { width: 340px; border-right: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+#sidebar h2 { padding: 14px 20px; font-size: 14px; border-bottom: 1px solid #30363d; color: #58a6ff; }
+#search-bar { padding: 10px 20px; border-bottom: 1px solid #30363d; display: flex; gap: 8px; }
+#search-input { flex: 1; padding: 6px 10px; border: 1px solid #30363d; background: #161b22; color: #c9d1d9; border-radius: 4px; font-family: monospace; font-size: 12px; }
+#search-input::placeholder { color: #484f58; }
+#search-input:focus { outline: none; border-color: #58a6ff; }
+#status-filter { padding: 6px 8px; border: 1px solid #30363d; background: #161b22; color: #c9d1d9; border-radius: 4px; font-size: 12px; cursor: pointer; }
+#trace-list { flex: 1; overflow-y: auto; }
+.trace-item { padding: 12px 20px; border-bottom: 1px solid #21262d; cursor: pointer; font-size: 13px; }
+.trace-item:hover { background: #161b22; }
+.trace-item.selected { background: #1f2937; border-left: 3px solid #58a6ff; }
+.trace-hash { font-family: monospace; color: #8b949e; font-size: 11px; }
+.trace-route { color: #c9d1d9; font-weight: bold; margin-top: 4px; }
+.trace-status { display: inline-block; }
+.trace-status.ok { color: #3fb950; }
+.trace-status.fail { color: #f85149; }
+.trace-meta { color: #8b949e; font-size: 12px; margin-top: 2px; }
+#controls { padding: 12px 20px; border-top: 1px solid #30363d; display: flex; gap: 8px; }
+#controls button { padding: 6px 14px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#controls button:hover { background: #30363d; }
+#controls button:disabled { opacity: 0.4; cursor: default; }
+#main { flex: 1; display: flex; flex-direction: column; }
+#graph-wrap { flex: 1; position: relative; min-height: 0; }
+#cy { width: 100%; height: 100%; }
+#legend { position: absolute; top: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 10px; color: #8b949e; background: rgba(13,17,23,0.85); padding: 5px 10px; border-radius: 4px; border: 1px solid #21262d; z-index: 10; max-width: 320px; }
+.leg { display: flex; align-items: center; gap: 5px; }
+.leg-line { width: 18px; height: 3px; border-radius: 1px; }
+.leg-line.l-amber { background: #d29922; }
+.leg-line.l-red { background: #f85149; }
+.leg-line.l-green { background: #3fb950; }
+.leg-line.l-dim-red { background: #943533; }
+.leg-line.l-dim-amber { background: #946b13; }
+#detail { flex: 0 0 auto; max-height: 45vh; border-top: 1px solid #30363d; padding: 16px 24px; overflow-y: auto; font-size: 15px; line-height: 1.6; }
+#detail h3 { font-size: 16px; margin-bottom: 10px; color: #58a6ff; }
+.detail-row { margin-bottom: 2px; }
+.detail-label { color: #8b949e; display: inline-block; min-width: 70px; }
+.detail-value { color: #c9d1d9; }
+.detail-cause { color: #d29922; font-weight: bold; }
+.detail-success { color: #3fb950; font-weight: bold; }
+.detail-fail { color: #f85149; font-weight: bold; }
+.detail-inferred { color: #8b949e; font-style: italic; }
+.detail-sub { padding-left: 78px; }
+.summary-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+.summary-table td { padding: 3px 8px; vertical-align: top; }
+.summary-table .s-icon { width: 20px; text-align: center; }
+.summary-table .s-route { }
+.summary-table .s-info { color: #8b949e; }
+.summary-cost { margin-top: 10px; padding-top: 8px; border-top: 1px solid #21262d; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>lntrace</h2>
+  <div id="search-bar">
+    <input id="search-input" type="text" placeholder="Paste a payment hash..." spellcheck="false" autocomplete="off">
+    <select id="status-filter">
+      <option value="all">All</option>
+      <option value="succeeded">Succeeded</option>
+      <option value="failed">Failed</option>
+    </select>
+  </div>
+  <div id="trace-list"></div>
+  <div id="controls">
+    <button id="btn-back" disabled>&larr; Network</button>
+    <span style="flex:1"></span>
+    <button id="btn-play" disabled>Play</button>
+    <button id="btn-step" disabled>Step</button>
+    <button id="btn-reset" disabled>Reset</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="graph-wrap">
+    <div id="cy"></div>
+    <div id="legend">
+      <span class="leg"><span class="leg-line l-amber"></span> reached</span>
+      <span class="leg"><span class="leg-line l-red"></span> failed</span>
+      <span class="leg"><span class="leg-line l-green"></span> succeeded</span>
+      <span class="leg"><span class="leg-line l-dim-red"></span><span class="leg-line l-dim-amber" style="margin-left:2px"></span> prior attempt</span>
+    </div>
+  </div>
+  <div id="detail">
+    <h3>Select a trace to begin</h3>
+  </div>
+</div>
+
+<script>
+(async function() {
+  const [graphData, traceList] = await Promise.all([
+    fetch('/api/graph').then(r => r.json()),
+    fetch('/api/traces').then(r => r.json())
+  ]);
+
+  const aliasMap = {};
+  graphData.nodes.forEach(n => { aliasMap[n.id] = n.alias || n.id.slice(0, 8) + '...'; });
+
+  // Load all traces upfront
+  const traceCache = {};
+  const traceMap = new Map();
+  const allHopNodeIds = new Set();
+  const receiverNodes = new Set();
+  for (const entry of traceList) {
+    const t = await fetch('/api/traces/' + entry.payment_hash).then(r => r.json());
+    traceCache[entry.payment_hash] = t;
+    traceMap.set(entry.payment_hash, entry);
+    for (const attempt of t.attempts) {
+      for (const hop of attempt.hops) allHopNodeIds.add(hop.node_id);
+      if (attempt.hops.length > 0)
+        receiverNodes.add(attempt.hops[attempt.hops.length - 1].node_id);
+    }
+  }
+
+  // Sender = node never appearing as a hop; receiver = last-hop destination
+  const allNodeIds = graphData.nodes.map(n => n.id);
+  const sender = allNodeIds.find(id => !allHopNodeIds.has(id)) || allNodeIds[0];
+  const receiver = allNodeIds.find(id => receiverNodes.has(id) && id !== sender) || allNodeIds[allNodeIds.length - 1];
+
+  function neighborsOf(nodeId) {
+    const out = [];
+    for (const ch of graphData.channels) {
+      if (ch.node_a === nodeId) out.push(ch.node_b);
+      else if (ch.node_b === nodeId) out.push(ch.node_a);
+    }
+    return out;
+  }
+
+  // --- Helpers ---
+
+  function findSenderForTrace(trace) {
+    const hopIds = new Set();
+    for (const a of trace.attempts)
+      for (const h of a.hops) hopIds.add(h.node_id);
+    if (trace.attempts.length > 0 && trace.attempts[0].hops.length > 0) {
+      const fh = trace.attempts[0].hops[0].node_id;
+      const fhNeighbors = neighborsOf(fh);
+      if (!hopIds.has(sender) && fhNeighbors.includes(sender)) return sender;
+      for (const n of fhNeighbors) {
+        if (!hopIds.has(n)) return n;
+      }
+    }
+    return sender;
+  }
+
+  function findSenderForAttempt(attempt) {
+    if (attempt.hops.length === 0) return sender;
+    const hopIds = new Set(attempt.hops.map(h => h.node_id));
+    const fh = attempt.hops[0].node_id;
+    const candidates = neighborsOf(fh).filter(n => !hopIds.has(n));
+    if (candidates.includes(sender)) return sender;
+    return candidates[0] || sender;
+  }
+
+  function alias(id) { return aliasMap[id] || id.slice(0, 8); }
+
+  function formatMsat(str) {
+    return str.replace(/(\d+)\s*msat/g, (_, d) =>
+      Math.floor(parseInt(d) / 1000).toLocaleString() + ' sat');
+  }
+
+  function formatWireReason(reason) {
+    return reason.replace(/^WIRE_/, '').toLowerCase();
+  }
+
+  function formatSatFee(msat) {
+    const sat = msat / 1000;
+    if (sat === Math.floor(sat)) return sat.toLocaleString();
+    return '\u2248' + Math.ceil(sat).toLocaleString();
+  }
+
+  // Format inferred_cause into compact summary with numbers
+  function formatCauseSummary(cause) {
+    const causeType = cause.split(/\s*\(/)[0];
+    const numMatch = cause.match(/spendable (\d+).*requested (\d+)/);
+    if (numMatch) {
+      const spendable = Math.floor(parseInt(numMatch[1]) / 1000).toLocaleString();
+      const requested = Math.floor(parseInt(numMatch[2]) / 1000).toLocaleString();
+      return `${causeType}, ${spendable} of ${requested} sat available`;
+    }
+    return causeType;
+  }
+
+  // --- Build Cytoscape ---
+
+  const elements = [];
+
+  graphData.nodes.forEach(n => {
+    const isExternal = n.instrumented === false;
+    const label = (n.alias || n.id.slice(0, 8)) + (isExternal ? '' : ' \u00b7 CLN');
+    elements.push({
+      data: { id: n.id, label: label },
+      classes: isExternal ? 'external' : ''
+    });
+  });
+
+  graphData.channels.forEach(ch => {
+    elements.push({
+      data: {
+        id: 'ch-' + ch.scid,
+        source: ch.node_a,
+        target: ch.node_b,
+        label: '',
+        scid: ch.scid,
+        width: Math.max(2, Math.min(6, ch.capacity_sat / 500000))
+      }
+    });
+  });
+
+  const cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: elements,
+    layout: {
+      name: 'fcose',
+      animate: false,
+      quality: 'proof',
+      nodeSeparation: 120,
+      nodeRepulsion: 8000,
+      idealEdgeLength: 150,
+      gravity: 0.15,
+      padding: 50,
+      fit: true,
+      randomize: true
+    },
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'text-margin-y': 8,
+          'text-margin-x': 0,
+          'background-color': '#484f58',
+          'color': '#c9d1d9',
+          'font-size': '12px',
+          'font-weight': 'bold',
+          'width': 28,
+          'height': 28,
+          'border-width': 2,
+          'border-color': '#30363d',
+          'text-background-color': '#0b0f17',
+          'text-background-opacity': 1,
+          'text-background-padding': '4px',
+          'text-background-shape': 'round-rectangle'
+        }
+      },
+      {
+        selector: 'node.external',
+        style: {
+          'background-color': '#0d1117',
+          'border-width': 2,
+          'border-color': '#484f58',
+          'border-style': 'dashed',
+          'color': '#6e7681'
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 'data(width)',
+          'line-color': '#30363d',
+          'curve-style': 'bezier',
+          'label': 'data(label)',
+          'font-size': '10px',
+          'color': '#8b949e',
+          'text-background-color': '#0d1117',
+          'text-background-opacity': 1,
+          'text-background-padding': '2px'
+        }
+      },
+      {
+        selector: 'edge.traversed',
+        style: { 'line-color': '#d29922' }
+      },
+      {
+        selector: 'edge.success',
+        style: { 'line-color': '#3fb950' }
+      },
+      {
+        selector: 'edge.fail',
+        style: { 'line-color': '#f85149' }
+      },
+      {
+        selector: 'edge.traversed-dim',
+        style: { 'line-color': '#946b13' }
+      },
+      {
+        selector: 'edge.success-dim',
+        style: { 'line-color': '#2d8041' }
+      },
+      {
+        selector: 'edge.fail-dim',
+        style: { 'line-color': '#943533' }
+      },
+      {
+        selector: '.hidden',
+        style: {
+          'display': 'none'
+        }
+      }
+    ],
+    userZoomingEnabled: true,
+    userPanningEnabled: true,
+    maxZoom: 2.5,
+    minZoom: 0.3
+  });
+
+  // Save initial positions after fcose completes so we can restore them
+  let savedPositions = {};
+  function savePositions() {
+    savedPositions = {};
+    cy.nodes().forEach(n => {
+      const p = n.position();
+      savedPositions[n.id()] = { x: p.x, y: p.y };
+    });
+  }
+  // fcose runs synchronously when animate:false, positions are ready
+  savePositions();
+
+  // Edge hover: show scid on mouseover (overview only, not during trace view)
+  const playbackLabels = new Set();
+  cy.on('mouseover', 'edge', function(evt) {
+    const e = evt.target;
+    if (!currentTrace && !playbackLabels.has(e.id())) e.data('label', e.data('scid'));
+  });
+  cy.on('mouseout', 'edge', function(evt) {
+    const e = evt.target;
+    if (!playbackLabels.has(e.id())) e.data('label', '');
+  });
+
+  // --- Layout helpers ---
+
+  function runPaymentLayout(trace) {
+    const traceSender = findSenderForTrace(trace);
+
+    // Compute rank for each route node from payment hops:
+    // sender=0, first hop=1, second hop=2, etc.
+    const nodeRank = new Map();
+    nodeRank.set(traceSender, 0);
+
+    for (const attempt of trace.attempts) {
+      for (let i = 0; i < attempt.hops.length; i++) {
+        const nid = attempt.hops[i].node_id;
+        const rank = i + 1;
+        if (!nodeRank.has(nid) || nodeRank.get(nid) < rank) {
+          nodeRank.set(nid, rank);
+        }
+      }
+    }
+
+    let maxRank = 0;
+    nodeRank.forEach(r => { if (r > maxRank) maxRank = r; });
+    if (maxRank === 0) maxRank = 1;
+
+    // Group route nodes by rank for vertical stacking
+    const rankGroups = new Map();
+    nodeRank.forEach((rank, nid) => {
+      if (!rankGroups.has(rank)) rankGroups.set(rank, []);
+      rankGroups.get(rank).push(nid);
+    });
+
+    // Position route nodes in model space (caller handles fit)
+    const xSpacing = 200;
+    const ySpacing = 150;
+    const routeEles = cy.collection();
+
+    cy.batch(() => {
+      nodeRank.forEach((rank, nid) => {
+        const node = cy.getElementById(nid);
+        if (node.length === 0) return;
+
+        const group = rankGroups.get(rank);
+        const idx = group.indexOf(nid);
+        const groupSize = group.length;
+
+        const x = rank * xSpacing;
+        const y = (idx - (groupSize - 1) / 2) * ySpacing;
+
+        node.position({ x, y });
+        routeEles.merge(node);
+      });
+    });
+
+    return routeEles;
+  }
+
+  function restoreLayout() {
+    cy.nodes().forEach(n => {
+      const pos = savedPositions[n.id()];
+      if (pos) n.animate({ position: pos, duration: 400 });
+    });
+    setTimeout(() => cy.fit(50), 420);
+  }
+
+  // --- Search and filter ---
+
+  const searchInput = document.getElementById('search-input');
+  const statusFilter = document.getElementById('status-filter');
+
+  function filterTraces() {
+    const query = searchInput.value.trim().toLowerCase();
+    const status = statusFilter.value;
+    let visibleCount = 0;
+    let lastVisibleHash = null;
+
+    document.querySelectorAll('.trace-item').forEach(el => {
+      const hash = el.dataset.hash.toLowerCase();
+      const entry = traceMap.get(el.dataset.hash);
+      const matchesHash = !query || hash.includes(query);
+      const matchesStatus = status === 'all'
+        || (status === 'succeeded' && entry.success)
+        || (status === 'failed' && !entry.success);
+      const visible = matchesHash && matchesStatus;
+      el.style.display = visible ? '' : 'none';
+      if (visible) { visibleCount++; lastVisibleHash = el.dataset.hash; }
+    });
+
+    // Auto-select when exactly one match and query is long enough
+    if (visibleCount === 1 && query.length >= 8) {
+      selectTrace(lastVisibleHash);
+    }
+  }
+
+  searchInput.addEventListener('input', filterTraces);
+  statusFilter.addEventListener('change', filterTraces);
+
+  // --- Trace list ---
+
+  const traceListEl = document.getElementById('trace-list');
+  traceList.forEach(entry => {
+    const t = traceCache[entry.payment_hash];
+    const ts = findSenderForTrace(t);
+    const tr = t.attempts.length > 0 && t.attempts[0].hops.length > 0
+      ? t.attempts[0].hops[t.attempts[0].hops.length - 1].node_id : receiver;
+    const amountSat = Math.floor(entry.amount_msat / 1000).toLocaleString();
+    const failedCount = t.attempts.filter(a => !a.success).length;
+    let statusText;
+    if (entry.success) {
+      statusText = failedCount > 0
+        ? `succeeded after ${failedCount} failed attempt${failedCount > 1 ? 's' : ''}`
+        : 'succeeded';
+    } else {
+      statusText = `failed (${entry.attempt_count} attempt${entry.attempt_count > 1 ? 's' : ''})`;
+    }
+
+    const div = document.createElement('div');
+    div.className = 'trace-item';
+    div.dataset.hash = entry.payment_hash;
+    div.innerHTML = `
+      <div class="trace-hash">${entry.payment_hash.slice(0, 16)}...</div>
+      <div class="trace-route">${alias(ts)} \u2192 ${alias(tr)} \u00b7 ${amountSat} sat</div>
+      <div class="trace-meta"><span class="trace-status ${entry.success ? 'ok' : 'fail'}">${statusText}</span></div>
+    `;
+    div.addEventListener('click', () => selectTrace(entry.payment_hash));
+    traceListEl.appendChild(div);
+  });
+
+  // --- Route focus ---
+
+  function focusRoute(trace) {
+    const routeNodeIds = new Set();
+    for (const attempt of trace.attempts) {
+      const s = findSenderForAttempt(attempt);
+      routeNodeIds.add(s);
+      for (const hop of attempt.hops) routeNodeIds.add(hop.node_id);
+    }
+
+    const routeEdgeIds = new Set();
+    for (const attempt of trace.attempts) {
+      const s = findSenderForAttempt(attempt);
+      let prev = s;
+      for (const hop of attempt.hops) {
+        const edge = findEdgeBetween(prev, hop.node_id);
+        edge.forEach(e => routeEdgeIds.add(e.id()));
+        prev = hop.node_id;
+      }
+    }
+
+    cy.elements().forEach(el => {
+      const isRoute = el.isNode()
+        ? routeNodeIds.has(el.id())
+        : routeEdgeIds.has(el.id());
+      if (isRoute) el.removeClass('hidden');
+      else el.addClass('hidden');
+    });
+  }
+
+  function unfocusRoute() {
+    cy.elements().removeClass('hidden');
+  }
+
+  // --- State ---
+
+  let currentTrace = null;
+  let currentAttemptIdx = -1;
+  let playTimer = null;
+
+  const btnBack = document.getElementById('btn-back');
+  const btnPlay = document.getElementById('btn-play');
+  const btnStep = document.getElementById('btn-step');
+  const btnReset = document.getElementById('btn-reset');
+  const detailEl = document.getElementById('detail');
+
+  btnBack.addEventListener('click', deselectTrace);
+  btnPlay.addEventListener('click', play);
+  btnStep.addEventListener('click', step);
+  btnReset.addEventListener('click', reset);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && currentTrace) deselectTrace();
+  });
+  cy.on('tap', function(evt) {
+    if (evt.target === cy && currentTrace) deselectTrace();
+  });
+
+  async function selectTrace(hash) {
+    document.querySelectorAll('.trace-item').forEach(el => {
+      el.classList.toggle('selected', el.dataset.hash === hash);
+    });
+    currentTrace = traceCache[hash] || await fetch('/api/traces/' + hash).then(r => r.json());
+    stopPlay();
+    resetEdges();
+
+    const routeEles = runPaymentLayout(currentTrace);
+    focusRoute(currentTrace);
+    showFinalFrame(routeEles);
+  }
+
+  function buildTraceHeader() {
+    const t = currentTrace;
+    const ts = findSenderForTrace(t);
+    const firstAttempt = t.attempts[0];
+    const tr = firstAttempt && firstAttempt.hops.length > 0
+      ? firstAttempt.hops[firstAttempt.hops.length - 1].node_id : '';
+    const amountMsat = firstAttempt && firstAttempt.hops.length > 0
+      ? firstAttempt.hops[firstAttempt.hops.length - 1].amount_msat : 0;
+    const amountSat = Math.floor(amountMsat / 1000).toLocaleString();
+
+    return `<h3>${alias(ts)} \u2192 ${alias(tr)} \u00b7 ${amountSat} sat</h3>` +
+      `<div class="trace-hash" style="margin-bottom:8px">${t.payment_hash}</div>`;
+  }
+
+  function showFinalFrame(routeEles) {
+    const t = currentTrace;
+    resetEdges();
+
+    // Step through all attempts to color edges
+    for (let i = 0; i < t.attempts.length; i++) {
+      if (i > 0) dimPreviousEdges();
+
+      const attempt = t.attempts[i];
+      const senderNode = findSenderForAttempt(attempt);
+      let prev = senderNode;
+      let failed = false;
+
+      for (const hop of attempt.hops) {
+        const edge = findEdgeBetween(prev, hop.node_id);
+        if (failed) {
+          // Don't highlight hops after the failure point
+        } else if (hop.failure) {
+          edge.addClass('fail');
+          failed = true;
+        } else {
+          edge.addClass(attempt.success ? 'success' : 'traversed');
+        }
+        prev = hop.node_id;
+      }
+    }
+
+    // Re-apply failure labels on all attempts (dimPreviousEdges clears them)
+    for (const attempt of t.attempts) {
+      const senderNode = findSenderForAttempt(attempt);
+      let prev = senderNode;
+      for (const hop of attempt.hops) {
+        if (hop.failure) {
+          const edge = findEdgeBetween(prev, hop.node_id);
+          const causeMatch = hop.failure.inferred_cause?.match(/spendable (\d+).*requested (\d+)/);
+          if (causeMatch) {
+            const spendable = Math.floor(parseInt(causeMatch[1]) / 1000).toLocaleString();
+            const requested = Math.floor(parseInt(causeMatch[2]) / 1000).toLocaleString();
+            edge.data('label', spendable + ' sat available \u00b7 ' + requested + ' needed');
+            if (edge.length > 0) playbackLabels.add(edge[0].id());
+          }
+          break;
+        }
+        prev = hop.node_id;
+      }
+    }
+
+    currentAttemptIdx = t.attempts.length - 1;
+    detailEl.innerHTML = buildTraceHeader() + buildSummaryPanel();
+    updateControls();
+
+    // Fit to route nodes LAST, after all positions + hidden + edge mutations
+    if (routeEles) {
+      cy.stop();
+      cy.animate({ fit: { eles: routeEles, padding: 100 }, duration: 300 });
+    }
+  }
+
+  function deselectTrace() {
+    stopPlay();
+    currentTrace = null;
+    currentAttemptIdx = -1;
+    resetEdges();
+    unfocusRoute();
+    document.querySelectorAll('.trace-item').forEach(el => el.classList.remove('selected'));
+    detailEl.innerHTML = '<h3>Select a trace to begin</h3>';
+    // Animate back to overview positions
+    cy.nodes().forEach(n => {
+      const pos = savedPositions[n.id()];
+      if (pos) n.animate({ position: pos, duration: 400 });
+    });
+    setTimeout(() => cy.animate({ fit: { eles: cy.elements(), padding: 50 }, duration: 300 }), 420);
+    updateControls();
+  }
+
+  function updateControls() {
+    const hasTrace = currentTrace !== null;
+    const hasMore = hasTrace && currentAttemptIdx < currentTrace.attempts.length - 1;
+    btnBack.disabled = !hasTrace;
+    btnPlay.disabled = !hasTrace;
+    btnStep.disabled = !hasMore;
+    btnReset.disabled = !hasTrace || currentAttemptIdx < 0;
+  }
+
+  function resetEdges() {
+    cy.edges().removeClass('success fail traversed success-dim fail-dim traversed-dim');
+    cy.edges().forEach(e => { e.data('label', ''); });
+    playbackLabels.clear();
+  }
+
+  function dimPreviousEdges() {
+    cy.edges('.traversed').removeClass('traversed').addClass('traversed-dim');
+    cy.edges('.fail').removeClass('fail').addClass('fail-dim');
+    cy.edges('.success').removeClass('success').addClass('success-dim');
+    cy.edges().forEach(e => { e.data('label', ''); });
+    playbackLabels.clear();
+  }
+
+  function findEdgeBetween(nodeA, nodeB) {
+    return cy.edges().filter(e => {
+      const s = e.data('source'), t = e.data('target');
+      return (s === nodeA && t === nodeB) || (s === nodeB && t === nodeA);
+    });
+  }
+
+  function step() {
+    if (!currentTrace) return;
+    if (currentAttemptIdx >= currentTrace.attempts.length - 1) return;
+
+    currentAttemptIdx++;
+    const attempt = currentTrace.attempts[currentAttemptIdx];
+    const total = currentTrace.attempts.length;
+    const idx = currentAttemptIdx;
+    const isLast = idx === total - 1;
+
+    dimPreviousEdges();
+
+    const senderNode = findSenderForAttempt(attempt);
+
+    const prevNodes = [senderNode];
+    let failingHop = null;
+    let erringNodeId = null;
+    let failed = false;
+
+    for (const hop of attempt.hops) {
+      const prev = prevNodes[prevNodes.length - 1];
+      const edge = findEdgeBetween(prev, hop.node_id);
+
+      if (failed) {
+        // Don't highlight hops after the failure point
+      } else if (hop.failure) {
+        edge.addClass('fail');
+        failingHop = hop;
+        erringNodeId = prev;
+        failed = true;
+        const causeMatch = hop.failure.inferred_cause?.match(/spendable (\d+).*requested (\d+)/);
+        if (causeMatch) {
+          const spendable = Math.floor(parseInt(causeMatch[1]) / 1000).toLocaleString();
+          const requested = Math.floor(parseInt(causeMatch[2]) / 1000).toLocaleString();
+          edge.data('label', spendable + ' sat available \u00b7 ' + requested + ' needed');
+          if (edge.length > 0) playbackLabels.add(edge[0].id());
+        }
+      } else {
+        edge.addClass(attempt.success ? 'success' : 'traversed');
+      }
+      prevNodes.push(hop.node_id);
+    }
+
+    if (isLast) {
+      detailEl.innerHTML = buildTraceHeader() + buildSummaryPanel();
+    } else {
+      detailEl.innerHTML = buildAttemptPanel(attempt, idx, total, senderNode, failingHop, erringNodeId);
+    }
+    updateControls();
+  }
+
+  function buildAttemptPanel(attempt, idx, total, senderNode, failingHop, erringNodeId) {
+    const sAlias = alias(senderNode);
+    let html = '';
+
+    if (failingHop) {
+      const eAlias = alias(erringNodeId);
+      const fAlias = alias(failingHop.node_id);
+      html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-fail">failed at ${eAlias} \u2192 ${fAlias}</span></h3>`;
+    } else if (attempt.success) {
+      html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-success">succeeded</span></h3>`;
+    } else {
+      html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-fail">failed</span></h3>`;
+    }
+
+    const route = [sAlias, ...attempt.hops.map(h => alias(h.node_id))].join(' \u2192 ');
+    html += `<div class="detail-row"><span class="detail-label">Route:</span> <span class="detail-value">${route}</span></div>`;
+
+    if (failingHop) {
+      const f = failingHop.failure;
+      if (f.local_failreason) {
+        const code = f.sender_failcode ? ' (0x' + f.sender_failcode.toString(16) + ')' : '';
+        const reason = formatWireReason(f.local_failreason);
+        const eAlias = alias(erringNodeId);
+        const fAlias = alias(failingHop.node_id);
+        html += `<div class="detail-row"><span class="detail-label">Error:</span> <span class="detail-fail">${reason}${code}</span></div>`;
+        html += `<div class="detail-sub">${eAlias} could not forward the payment over ${eAlias} \u2192 ${fAlias}</div>`;
+      }
+      if (f.inferred_cause) {
+        const causeType = f.inferred_cause.split(/\s*\(/)[0];
+        const causeDetails = f.inferred_cause.match(/\(([^)]+)\)/)?.[1];
+        html += `<div class="detail-row"><span class="detail-label">Cause:</span> <span class="detail-cause">${causeType}</span></div>`;
+        if (causeDetails) html += `<div class="detail-sub">${formatMsat(causeDetails)}</div>`;
+        html += `<div class="detail-sub detail-inferred">(inferred from ${alias(erringNodeId)}'s channel state)</div>`;
+      }
+    } else if (attempt.failure) {
+      html += `<div class="detail-row"><span class="detail-label">Error:</span> <span class="detail-fail">${attempt.failure.explanation}</span></div>`;
+    } else if (attempt.success) {
+      html += `<div class="detail-row"><span class="detail-success">Payment succeeded on this attempt.</span></div>`;
+    }
+
+    if (attempt.duration_secs) {
+      html += `<div class="detail-row" style="margin-top:4px"><span class="detail-label">Duration:</span> <span class="detail-value">${attempt.duration_secs.toFixed(3)}s</span></div>`;
+    }
+    return html;
+  }
+
+  function buildSummaryPanel() {
+    const t = currentTrace;
+    const failedCount = t.attempts.filter(a => !a.success).length;
+
+    let header = '';
+    if (t.success && failedCount > 0) {
+      const successAttempt = t.attempts.find(a => a.success);
+      const failedAttempt = t.attempts.find(a => !a.success);
+      let viaText = '';
+      if (successAttempt && failedAttempt) {
+        const failedHopIds = new Set(failedAttempt.hops.map(h => h.node_id));
+        const retryHop = successAttempt.hops.find(h => !failedHopIds.has(h.node_id));
+        if (retryHop) viaText = ` via ${alias(retryHop.node_id)}`;
+      }
+      header = `Payment succeeded on retry${viaText}`;
+    } else if (t.success) {
+      header = 'Payment succeeded';
+    } else {
+      header = 'Payment failed';
+    }
+
+    let html = `<div class="detail-row" style="margin-bottom:6px"><span class="${t.success ? 'detail-success' : 'detail-fail'}">${header}</span></div>`;
+    html += '<table class="summary-table">';
+
+    for (let i = 0; i < t.attempts.length; i++) {
+      const a = t.attempts[i];
+      const s = findSenderForAttempt(a);
+      const route = [alias(s), ...a.hops.map(h => alias(h.node_id))].join(' \u2192 ');
+      const dur = a.duration_secs ? ' \u00b7 ' + a.duration_secs.toFixed(3) + 's' : '';
+      const icon = a.success ? '<span class="detail-success">\u2713</span>' : '<span class="detail-fail">\u2717</span>';
+
+      let info = '';
+      if (a.success) {
+        info = '<span class="detail-success">succeeded</span>';
+      } else {
+        const fHop = a.hops.find(h => h.failure);
+        if (fHop) {
+          const fIdx = a.hops.indexOf(fHop);
+          const erring = fIdx === 0 ? alias(s) : alias(a.hops[fIdx - 1].node_id);
+          const causeSummary = fHop.failure.inferred_cause
+            ? formatCauseSummary(fHop.failure.inferred_cause)
+            : formatWireReason(fHop.failure.local_failreason || 'unknown');
+          info = `<span class="detail-fail">failed at ${erring} \u2192 ${alias(fHop.node_id)}</span>: ${causeSummary} <span class="detail-inferred">(inferred)</span>`;
+        } else {
+          info = '<span class="detail-fail">failed</span>';
+        }
+      }
+
+      html += `<tr>
+        <td class="s-icon">${icon}</td>
+        <td class="s-route">${route}${dur}</td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="s-info">${info}</td>
+      </tr>`;
+    }
+
+    html += '</table>';
+
+    // Cost summary
+    const successAttempt = t.attempts.find(a => a.success);
+    if (successAttempt) {
+      const deliveredMsat = successAttempt.hops.length > 0
+        ? successAttempt.hops[successAttempt.hops.length - 1].amount_msat : 0;
+      const successFeeMsat = successAttempt.hops.reduce((sum, h) => sum + (h.fee_msat || 0), 0);
+      const totalDuration = t.attempts.reduce((sum, a) => sum + (a.duration_secs || 0), 0);
+      const delivered = Math.floor(deliveredMsat / 1000).toLocaleString();
+      const fee = formatSatFee(successFeeMsat);
+
+      html += `<div class="summary-cost">`;
+      html += `Delivered ${delivered} sat \u00b7 fee ${fee} sat \u00b7 ${t.attempts.length} attempt${t.attempts.length !== 1 ? 's' : ''} \u00b7 ${totalDuration.toFixed(2)}s total`;
+
+      // Show cost of the retry if the failed route would have been cheaper
+      const failedAttempt = t.attempts.find(a => !a.success);
+      if (failedAttempt) {
+        const failedFeeMsat = failedAttempt.hops.reduce((sum, h) => sum + (h.fee_msat || 0), 0);
+        const extraMsat = successFeeMsat - failedFeeMsat;
+        if (extraMsat > 1000) {
+          const extraFee = formatSatFee(extraMsat);
+          const successFirst = successAttempt.hops.length > 0 ? alias(successAttempt.hops[0].node_id) : '?';
+          const failedFirst = failedAttempt.hops.length > 0 ? alias(failedAttempt.hops[0].node_id) : '?';
+          html += `<div style="margin-top:4px" class="detail-cause">The failure cost ${extraFee} sat extra \u2014 routing via ${successFirst} instead of ${failedFirst}</div>`;
+        }
+      }
+      html += `</div>`;
+    }
+
+    return html;
+  }
+
+  function play() {
+    if (playTimer) return;
+    // Always replay from the beginning
+    currentAttemptIdx = -1;
+    resetEdges();
+    step();
+    if (currentAttemptIdx < currentTrace.attempts.length - 1) {
+      playTimer = setInterval(() => {
+        step();
+        if (currentAttemptIdx >= currentTrace.attempts.length - 1) stopPlay();
+      }, 2500);
+    }
+  }
+
+  function stopPlay() {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  }
+
+  function reset() {
+    stopPlay();
+    resetEdges();
+    if (currentTrace) {
+      const routeEles = runPaymentLayout(currentTrace);
+      focusRoute(currentTrace);
+      showFinalFrame(routeEles);
+    } else {
+      currentAttemptIdx = -1;
+      unfocusRoute();
+      restoreLayout();
+      updateControls();
+    }
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+---
+source: adapters/cln/tests/golden_graph.rs
+expression: graph
+---
+nodes:
+  - id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+    alias: node-C
+    instrumented: true
+  - id: 034b843630914ddc28d1c97d5cb3afe9bbdc39a986c60d70644b0e0a627fbfceb4
+    alias: node-A
+    instrumented: true
+  - id: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+    alias: node-B
+    instrumented: true
+  - id: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+    alias: node-D
+    instrumented: true
+channels:
+  - scid: 108x1x0
+    node_a: 034b843630914ddc28d1c97d5cb3afe9bbdc39a986c60d70644b0e0a627fbfceb4
+    node_b: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+    capacity_sat: 1000000
+    a_local_msat: 949999499
+    b_local_msat: 50000501
+  - scid: 108x2x0
+    node_a: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+    node_b: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+    capacity_sat: 1000000
+    a_local_msat: 950000000
+    b_local_msat: 50000000
+  - scid: 111x1x0
+    node_a: 034b843630914ddc28d1c97d5cb3afe9bbdc39a986c60d70644b0e0a627fbfceb4
+    node_b: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+    capacity_sat: 1000000
+    a_local_msat: 949945000
+    b_local_msat: 50055000
+  - scid: 111x2x0
+    node_a: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+    node_b: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+    capacity_sat: 1000000
+    a_local_msat: 50000000
+    b_local_msat: 950000000

@@ -69,7 +69,7 @@ impl fmt::Display for FundingOutpoint {
 }
 
 /// Channel identifier. At least one of scid or funding should be present.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelId {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scid: Option<ShortChannelId>,
@@ -95,6 +95,9 @@ pub struct Hop {
     pub amount_msat: u64,
     pub fee_msat: u64,
     pub cltv_expiry: u32,
+    /// Channel direction (0 or 1). Used to disambiguate which end failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<u32>,
 }
 
 /// Close reason for a channel.

@@ -1,0 +1,130 @@
+---
+source: adapters/cln/tests/golden_correlator.rs
+expression: traces
+---
+- payment_hash: 4a102d164077df4a36c108eeb52165b6040fabe41264782aca33b7cfbcd48828
+  attempts:
+    - groupid: 3286151340503371971
+      partid: 1
+      hops:
+        - index: 0
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 900000000
+          fee_msat: 0
+          confidence: exact
+      success: true
+      duration_secs: 0.247951804
+  success: true
+- payment_hash: c2bc4b866a5f50f9b360f48718969101453f00993be8bdf58bb291204ce3f5a9
+  attempts:
+    - groupid: 6888067461305219489
+      partid: 1
+      hops:
+        - index: 0
+          node_id: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+          amount_msat: 100105000
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 100000000
+          fee_msat: 105000
+          confidence: exact
+          failure:
+            sender_failcode: 4103
+            local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
+            inferred_cause: "insufficient outbound liquidity (spendable 35694000 msat, HTLC requested 100000000 msat)"
+      success: false
+      failure:
+        failcode: 4103
+        erring_node: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+        explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
+      duration_secs: 0.340441817
+    - groupid: 6888067461305219489
+      partid: 2
+      hops:
+        - index: 0
+          node_id: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+          amount_msat: 25000251
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 25000000
+          fee_msat: 251
+          confidence: exact
+      success: false
+    - groupid: 6888067461305219489
+      partid: 3
+      hops:
+        - index: 0
+          node_id: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+          amount_msat: 75080000
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 75000000
+          fee_msat: 80000
+          confidence: exact
+          failure:
+            sender_failcode: 4103
+            local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
+            inferred_cause: "insufficient outbound liquidity (spendable 35694000 msat, HTLC requested 75000000 msat)"
+      success: false
+      failure:
+        failcode: 4103
+        erring_node: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+        explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
+      duration_secs: 0.522800279
+    - groupid: 6888067461305219489
+      partid: 4
+      hops:
+        - index: 0
+          node_id: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+          amount_msat: 15000151
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 15000000
+          fee_msat: 151
+          confidence: exact
+          failure:
+            sender_failcode: 4103
+            local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
+            inferred_cause: "insufficient outbound liquidity (spendable 10267000 msat, HTLC requested 15000000 msat)"
+      success: false
+      failure:
+        failcode: 4103
+        erring_node: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+        explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
+      duration_secs: 0.59438609
+    - groupid: 6888067461305219489
+      partid: 5
+      hops:
+        - index: 0
+          node_id: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+          amount_msat: 60065000
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+          amount_msat: 60000000
+          fee_msat: 65000
+          confidence: exact
+          failure:
+            sender_failcode: 4103
+            local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
+            inferred_cause: "insufficient outbound liquidity (spendable 35694000 msat, HTLC requested 60000000 msat)"
+      success: false
+      failure:
+        failcode: 4103
+        erring_node: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+        explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
+      duration_secs: 0.593599736
+  success: false
+  failure:
+    failcode: 4103
+    erring_node: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+    explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."

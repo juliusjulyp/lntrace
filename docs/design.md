@@ -66,88 +66,82 @@ Every event is wrapped in an Envelope carrying: the observing node ID, a per-nod
 
 ## Cross-node failure enrichment
 
-This is the key insight that makes `lntrace` more than a log viewer. BOLT 4's `temporary_channel_failure` (code 7) is notoriously overloaded: the sender sees "temporary failure" but can't distinguish insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is closing.
+This is the key insight that makes `lntrace` more than a log viewer. BOLT 4's `temporary_channel_failure` (code 0x1007) is notoriously overloaded: the sender sees "temporary failure" but can't distinguish insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is closing.
 
-When the failing node is also instrumented, `lntrace` correlates the sender's generic failure code with the actual cause on the failing node:
+**What forward_event gives us.** CLN's `forward_event` on `local_failed` carries a `failreason` string, but in practice it's just the same generic wire code (e.g. `WIRE_TEMPORARY_CHANNEL_FAILURE`). This confirms *which* hop failed and that the intermediate node saw the failure locally, but does not reveal the actual cause.
 
-- CLN's `forward_event` carries the local failure code and reason on `local_failed` (e.g. "Capacity exceeded")
-- LND's link-fail events carry a `failure_detail` (e.g. "INSUFFICIENT_BALANCE")
+**Where real enrichment comes from.** To determine *why* the forward failed, `lntrace` polls `listpeerchannels` on the failing node to get channel state snapshots: `spendable_msat`, `receivable_msat`, `htlc_maximum_msat`, channel status. When the correlator sees a `temporary_channel_failure` and the channel snapshot shows `spendable_msat < htlc_amount`, it can report: "hop B->C failed: `temporary_channel_failure` — actual cause: insufficient liquidity (spendable 100,000 msat, HTLC requested 50,000,000 msat)."
 
-The trace then shows: "hop B->C failed: `temporary_channel_failure` — actual cause: insufficient liquidity (local balance 45,000 sat, HTLC requested 50,000 sat)."
+- **Stage 1 (done):** Forward_event merge — the correlator matches the sender's generic error with the intermediate node's `local_failed` forward, confirming the failing hop.
+- **Stage 2 (planned):** `listpeerchannels` polling via `poll_state()` — the CLN adapter periodically snapshots channel state. Snapshots are attached to traces as `Inferred` confidence.
+- LND's link-fail events carry a `failure_detail` (e.g. "INSUFFICIENT_BALANCE") which provides richer data than CLN's `forward_event`.
 
-This enrichment requires the failing node to run CLN or LND. LDK Node intermediates currently emit nothing on a failed forward.
+This enrichment requires the failing node to be instrumented. LDK Node intermediates currently emit nothing on a failed forward.
 
 ---
 
 ## Crate dependency graph
 
 ```
-lntrace-cli
-  -> lntrace-core
-  -> lntrace-collector
-  -> lntrace-correlator -> lntrace-core
-  -> lntrace-explain
+lntrace-cli (binary)
+  -> lntrace
 
 lntrace-cln (adapter + recorder)
-  -> lntrace-core
-  -> lntrace-collector
-  -> cln-plugin, cln-rpc
-
-lntrace-ldk (stub)
-  -> lntrace-core
-  -> lntrace-collector
+  -> lntrace
+  -> cln-plugin 0.7, cln-rpc 0.7, sha2
 ```
+
+The `lntrace` library crate contains: core types, collector, correlator, and BOLT 4 decoder as modules. The correlator is `pub(crate)` with its public surface re-exported at the crate root.
 
 ---
 
 ## Roadmap
 
-### Stage 2 — Correlator (next)
+### v0.1 — Core trace pipeline (in progress)
 
-Build the correlator's `build_trace()` function using the captured fixture data. This is the core of the project — turning raw events into structured payment traces.
+The minimum viable tool: capture events across a multi-hop network, correlate them into traces, enrich failures with data from the failing node, and display the result in a graph UI.
 
-- [ ] Implement `build_trace()`: construct hops from `sendpay_success`/`sendpay_failure` events
-- [ ] Extract failing hop data (erring_node, erring_channel, failcode) into TracedHop
-- [ ] Wire CLI `trace` command to show real hop-by-hop output
-- [ ] Add correlator tests using regtest fixtures
-- [ ] Integrate BOLT 4 explainer into trace output for failed payments
+- [x] Upgrade CLN lab to v26.06.8 with xpay
+- [x] 3-node lab (A→B→C) with drained-channel failure scenario
+- [x] Recapture fixtures with the recorder (one file per node)
+- [x] CLN adapter: typed xpay deserialization (`cln-rpc 0.7`), `sha256(preimage)` for `invoice_payment`
+- [x] `build_trace()` with hop reconstruction and cross-node forward_event merge
+- [x] Per-shard attempt pairing by `(groupid, partid)` — retries produce separate attempts, not merged routes
+- [x] Failing hop match on scid + direction + node_id verification
+- [x] Cause rules module: infer actual cause of `temporary_channel_failure` from channel snapshots
+- [x] `listpeerchannels` polling via `poll_state()` for liquidity enrichment — periodic + on-demand after `local_failed`
+- [x] 32 tests: 19 library (correlator + cause + BOLT 4) + 12 adapter (translate + cross-node hash match) + 1 golden (insta)
+- [ ] Recapture fixtures with polling-enabled recorder for enrichment golden test
+- [ ] Graph UI: `lntrace ui --log` (replay) and `lntrace ui --follow` (live)
+- [ ] Demo script and recording
 
-### Stage 3 — Cross-node correlation
+**Done when:** a drained-channel payment in the live lab shows up in the graph with the failing hop highlighted and the real cause in the side panel, and the same flow replays identically from the recorded log.
 
-Merge data from multiple instrumented nodes into a single trace. This enables the failure enrichment described above.
+### v0.2 — Breadth
 
-- [ ] Multi-node event ingestion (collector accepts events from N adapters)
-- [ ] Forward event correlation: match sender's failing hop with intermediate's `forward_event`
-- [ ] `temporary_channel_failure` enrichment with actual cause from the failing node
-- [ ] Confidence markers on inferred hops (channel adjacency + timing-based matching)
-- [ ] Add LDK adapter: channel lifecycle + forward-settled events (intermediate/receiver role)
-
-### Stage 4 — MPP and graph UI
-
-Multi-part payment support and visual debugging.
-
-- [ ] MPP shard decomposition using CLN `pay_part_start`/`pay_part_end`
+- [ ] LDK adapter (intermediate/receiver role): channel lifecycle + forward-settled events
+- [ ] MPP shard decomposition using `pay_part_start`/`pay_part_end`
 - [ ] Shard tree display: per-shard paths, which shard failed, `mpp_timeout` detection
-- [ ] Lightweight graph UI: nodes, channels, HTLC animation for lab demos
+- [ ] OpenTelemetry span export (Jaeger / Grafana Tempo compatible)
 - [ ] Shareable trace file format with pseudonymization
 
-### Stage 5 — LND and OpenTelemetry
+### v0.3 — LND and scenario runner
 
 - [ ] LND adapter (`routerrpc.SubscribeHtlcEvents` + `routerrpc.TrackPayments`)
-- [ ] OpenTelemetry span export (Jaeger / Grafana Tempo compatible)
 - [ ] Scenario runner: declarative test scenarios with assertions and CI mode
 
-### Stage 6 — Replay and pathfinding analysis
+### Future
 
-- [ ] Counterfactual route replay: "what if channel X was excluded?"
-- [ ] rust-lightning `Router` wrapper to capture pathfinding decisions and scorer state
-- [ ] Stuck HTLC detection and CLTV expiry countdown (CLN + LND)
+- Counterfactual route replay: "what if channel X was excluded?"
+- rust-lightning `Router` wrapper to capture pathfinding decisions and scorer state
+- Stuck HTLC detection and CLTV expiry countdown (CLN + LND)
+- BOLT 12 flow tracing (blinded paths, onion messages)
+- Channel jamming classification (anomalous HTLC hold times)
+- LSPS protocol tracing (JIT channel opens via LSPS1/LSPS2)
 
-### Research directions
+### Anytime
 
-- **BOLT 12 flow tracing.** Offers add new failure modes (blinded paths, onion messages). Requires rust-lightning-level instrumentation.
-- **Channel jamming classification.** Detecting anomalous HTLC hold times is feasible; labeling intent (slow peer vs probe vs jam) is an open research question.
-- **LSPS protocol tracing.** JIT channel opens (LSPS1/LSPS2) are handled internally by LDK Node without public events.
+- Open ldk-node upstream issue for per-path payment events (ecosystem engagement)
 
 ---
 
@@ -193,7 +187,7 @@ outcome = "success"
 via     = ["B"]   # reroutes via B-D after B-C is drained
 ```
 
-The scenario runner is planned for Stage 5.
+The scenario runner is planned for v0.3.
 
 ## Non-goals
 

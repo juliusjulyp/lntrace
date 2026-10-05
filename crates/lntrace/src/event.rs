@@ -121,11 +121,14 @@ pub enum TraceEvent {
         /// Duration of the attempt in seconds.
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_secs: Option<f64>,
+        /// Direction of the failing channel (0 or 1).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        failed_direction: Option<u32>,
     },
 }
 
 /// Channel state for Snapshot events.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelSnapshot {
     pub channel: ChannelId,
     pub peer: NodeId,
@@ -133,4 +136,25 @@ pub struct ChannelSnapshot {
     pub local_msat: u64,
     pub remote_msat: u64,
     pub active: bool,
+    /// Channel direction (0 or 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<u32>,
+    /// Implementation-specific channel state string (e.g. "CHANNELD_NORMAL").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// How much we can actually send right now (after reserves, fees, in-flight).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spendable_msat: Option<u64>,
+    /// How much the peer can send to us right now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receivable_msat: Option<u64>,
+    /// Minimum HTLC we can send through this channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_htlc_out_msat: Option<u64>,
+    /// Maximum number of HTLCs allowed in flight.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_accepted_htlcs: Option<u32>,
+    /// Number of HTLCs currently in flight.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inflight_htlc_count: Option<u32>,
 }

@@ -2,33 +2,26 @@
 
 [![CI](https://github.com/juliusjulyp/lntrace/actions/workflows/ci.yml/badge.svg)](https://github.com/juliusjulyp/lntrace/actions/workflows/ci.yml)
 
+![Network overview](docs/lntrace-overview.png)
+![Reroute trace](docs/lntrace-reroute.png)
+![Success trace](docs/lntrace-success.png)
 
-
-`lntrace` is a payment debugging tool for the Bitcoin Lightning Network, written in Rust. It connects to nodes running different implementations (CLN, LDK, LND), stitches their events into a single trace per payment, and tells you exactly which hop failed and why — including multi-part payments where shards take different paths.
+`lntrace` is a payment debugging tool for the Bitcoin Lightning Network, written in Rust. It collects notifications from Lightning nodes, stitches their events into a single trace per payment, and tells you exactly which hop failed and why — including reroutes where the sender retries on a different path. Currently supports CLN, with LDK and LND adapters planned.
 
 ---
 
 ## Current status
 
-Stages 0-1 are complete. The core crates compile and pass tests, the CLN adapter captures real notification data from a regtest lab, and the CLI can inspect events and decode failure codes.
+The library, CLN adapter, correlator, and CLI compile and pass all the 40 tests. The CLN adapter uses typed deserialization via `cln-rpc 0.7` notification structs. The correlator pairs each path attempt with its result by `(groupid, partid)`, merges cross-node forward events for failure enrichment, and infers the actual cause of `temporary_channel_failure` from channel state snapshots.
 
 | Component | Status | Description |
 |---|---|---|
-| Core types | done | TraceEvent (11 variants), Envelope, Capabilities, EventSource trait |
-| Collector | done | Async JSONL writer, reader, and tailer |
-| BOLT 4 explainer | done | 23 BOLT 4 failure codes with plain-language explanation and guidance |
-| CLI | done | `events`, `trace`, `replay`, `explain` subcommands |
-| CLN adapter | done | Translates CLN notifications to TraceEvent (via `sendpay_*`; xpay `pay_part_*` requires CLN >= v25.08) |
-| Docker lab | done | Bitcoin Core + 2 CLN nodes, automated channel setup and payments |
-| Correlator | partial | Groups events by payment_hash; hop construction is Stage 2 |
-| LDK adapter | stub | Struct and trait skeleton |
-
-### Known limitations
-
-- **2-node lab.** Sender and receiver with a direct channel — no intermediate hops yet.
-- **CLN v25.02 / legacy `pay` only.** xpay notifications (`pay_part_start`/`pay_part_end`) require CLN >= v25.08.
-- **Correlator hops are stubbed.** Events are grouped by payment hash but hop-by-hop paths aren't reconstructed yet.
-- **No LDK or LND adapters.** LDK is a skeleton; LND is not started.
+| `lntrace` library | done | Types, JSONL collector, correlator, graph builder, BOLT 4 decoder |
+| CLI | done | `events`, `trace`, `replay`, `explain`, `ui` subcommands |
+| Replay UI | done | Cytoscape.js graph with fcose layout, route focus, search/filter, step/play animation, summary panel |
+| CLN adapter | done | Typed xpay deserialization, listpeerchannels polling, recorder plugin |
+| Correlator | done | Per-shard attempt pairing, direction-aware hop matching, cause inference from channel snapshots |
+| Docker lab | done | 4-node diamond CLN v26.06.8 lab with success, reroute, and total-failure scenarios |
 
 ---
 
@@ -49,14 +42,18 @@ cargo test --all
 # decode a BOLT 4 failure code
 cargo run -p lntrace-cli -- explain 0x1007
 
-# list events from the regtest fixture
-cargo run -p lntrace-cli -- events --log fixtures/cln-regtest-envelope.jsonl
+# list events from a fixture directory
+cargo run -p lntrace-cli -- events --log fixtures/4node-reroute/
 
 # show all payment traces
-cargo run -p lntrace-cli -- replay fixtures/cln-regtest-envelope.jsonl
+cargo run -p lntrace-cli -- replay fixtures/4node-reroute/
 
 # trace a specific payment
-cargo run -p lntrace-cli -- trace <payment_hash> --log fixtures/cln-regtest-envelope.jsonl
+cargo run -p lntrace-cli -- trace <payment_hash> --log fixtures/4node-reroute/
+
+# launch the graph UI against a fixture directory
+cargo run -p lntrace-cli -- ui --log fixtures/4node-reroute/
+# then open http://localhost:8080
 ```
 
 ### Run the Docker regtest lab
@@ -64,11 +61,23 @@ cargo run -p lntrace-cli -- trace <payment_hash> --log fixtures/cln-regtest-enve
 ```bash
 cd lab
 docker compose up -d --build
-bash fund-and-pay.sh          # opens channel, sends payments, captures fixtures
+bash fund-and-pay.sh          # opens channels, runs 3 scenarios, captures fixtures
 docker compose down -v         # clean teardown
 ```
 
-The lab uses CLN v25.02. Fixtures are written to `fixtures/cln-regtest-raw.jsonl` (7 events: channel opens, successful payments, and a `WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS` failure).
+The lab uses CLN v26.06.8 with xpay in a diamond topology:
+
+```
+A ── B ── C
+ \       /
+  ── D ──
+```
+
+D's fees are raised so xpay prefers B when it has liquidity. Three scenarios are captured to separate fixture directories:
+
+1. **Success** (`fixtures/4node-success/`): A pays C via B.
+2. **Reroute** (`fixtures/4node-reroute/`): B→C drained, A pays C. Attempt 1 fails via B (`temporary_channel_failure`), xpay retries via D.
+3. **Total failure** (`fixtures/4node-allfail/`): Both B→C and D→C drained, A pays C. All attempts fail with inferred causes.
 
 ---
 
@@ -77,14 +86,10 @@ The lab uses CLN v25.02. Fixtures are written to `fixtures/cln-regtest-raw.jsonl
 ```
 lntrace/
   crates/
-    lntrace-core/          # types, events, envelope, capabilities, EventSource trait
-    lntrace-collector/     # JSONL log writer, reader, tailer
-    lntrace-correlator/    # payment trace builder (partial)
-    lntrace-explain/       # BOLT 4 failure code decoder
-    lntrace-cli/           # CLI binary
+    lntrace/               # library: types, collector, correlator, BOLT 4 decoder
+    lntrace-cli/           # CLI binary + graph UI server
   adapters/
-    cln/                   # CLN plugin (recorder + adapter)
-    ldk/                   # LDK Node adapter (stub)
+    cln/                   # CLN plugin + recorder
   lab/                     # Docker regtest lab
   fixtures/                # real CLN notification data from regtest
 ```
@@ -93,14 +98,12 @@ lntrace/
 
 ## Roadmap
 
-| Stage | Focus | Status |
+| Milestone | Focus | Status |
 |---|---|---|
-| 0-1 | Core types, CLN adapter, CLI, regtest lab | done |
-| 2 | Correlator — `build_trace()` with real hop reconstruction | next |
-| 3 | Cross-node correlation — merge events from multiple nodes | planned |
-| 4 | MPP shard decomposition and graph UI | planned |
-| 5 | LND adapter, OpenTelemetry export, scenario runner | planned |
-| 6 | Counterfactual replay, pathfinding analysis | planned |
+| v0.1 | Core trace pipeline: 4-node xpay lab, `build_trace()` with hop reconstruction, cross-node `temporary_channel_failure` enrichment, graph UI | in progress |
+| v0.2 | Breadth: LDK adapter (intermediate), MPP shard trees, OTel export, shareable traces | planned |
+| v0.3 | LND adapter, scenario runner | planned |
+| Future | Counterfactual replay, BOLT 12 tracing, channel jamming detection, LSPS | research |
 
 See [docs/design.md](docs/design.md) for architecture details, event schema, capability matrix, and the full roadmap with checklists.
 

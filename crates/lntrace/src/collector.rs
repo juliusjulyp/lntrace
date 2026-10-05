@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lntrace_core::{now_ms, Envelope};
+use crate::{now_ms, Envelope};
 use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

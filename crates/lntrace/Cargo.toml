@@ -1,9 +1,9 @@
 [package]
-name = "lntrace-core"
+name = "lntrace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Core types for lntrace: TraceEvent, Envelope, Capabilities, EventSource"
+description = "Lightning Network payment tracing library: types, collector, correlator, BOLT 4 decoder"
 
 [dependencies]
 serde = { workspace = true }
@@ -11,3 +11,4 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
+tokio = { workspace = true }

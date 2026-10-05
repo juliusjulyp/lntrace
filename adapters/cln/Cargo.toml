@@ -14,15 +14,18 @@ name = "lntrace-cln"
 path = "src/main.rs"
 
 [[bin]]
-name = "lntrace-cln-recorder"
+name = "lntrace-cln-record"
 path = "src/recorder.rs"
 
 [dependencies]
-lntrace-core = { workspace = true }
-lntrace-collector = { workspace = true }
+lntrace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 cln-plugin = { workspace = true }
 cln-rpc = { workspace = true }
+sha2 = "0.10"
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }

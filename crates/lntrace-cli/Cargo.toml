@@ -1,21 +1,21 @@
 [package]
-name = "lntrace"
+name = "lntrace-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "CLI for lntrace: trace, events, replay"
+description = "CLI for lntrace: trace, events, replay, explain"
 
 [[bin]]
 name = "lntrace"
 path = "src/main.rs"
 
 [dependencies]
-lntrace-core = { workspace = true }
-lntrace-collector = { workspace = true }
-lntrace-correlator = { workspace = true }
-lntrace-explain = { workspace = true }
+lntrace = { workspace = true }
+lntrace-cln = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }

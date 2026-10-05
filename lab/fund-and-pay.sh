@@ -1,34 +1,89 @@
 #!/usr/bin/env bash
-# Fund channels and send test payments for fixture capture.
-# Run this after docker compose up has started all containers.
+# 4-node regtest lab: fund channels, run 3 payment scenarios, capture fixtures.
+#
+# Topology:
+#   A ── B ── C
+#    \       /
+#     ── D ──
+#
+# Channels: A→B (1M sat), B→C (1M sat), A→D (1M sat), D→C (1M sat)
+# D's fees raised to 5000 base + 1000ppm so xpay prefers B route.
+#
+# Scenario 1 (success):      A pays C 50k sat → routes via B (cheapest)
+# Scenario 2 (reroute):      Drain B→C, A pays C → fails via B, retries via D
+# Scenario 3 (total fail):   Also drain D→C, A pays C → all paths fail
+#
+# Run after: docker compose up -d --build
 set -euo pipefail
 
 BCLI="docker exec lntrace-bitcoind bitcoin-cli -regtest -rpcuser=lntrace -rpcpassword=lntrace"
-LCLI_A="docker exec lntrace-cln-sender lightning-cli --lightning-dir=/home/clightning/.lightning --network=regtest"
-LCLI_B="docker exec lntrace-cln-receiver lightning-cli --lightning-dir=/home/clightning/.lightning --network=regtest"
+LCLI_A="docker exec lntrace-cln-a lightning-cli --network=regtest"
+LCLI_B="docker exec lntrace-cln-b lightning-cli --network=regtest"
+LCLI_C="docker exec lntrace-cln-c lightning-cli --network=regtest"
+LCLI_D="docker exec lntrace-cln-d lightning-cli --network=regtest"
 
-echo "=== Waiting for nodes to sync ==="
-# Wait for CLN nodes to be responsive
-for node in "$LCLI_A" "$LCLI_B"; do
+RAW_FILE="regtest/lntrace-raw.jsonl"
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+wait_for_node() {
+    local name="$1" cli="$2"
     for i in $(seq 1 30); do
-        if $node getinfo > /dev/null 2>&1; then break; fi
-        echo "  waiting for node... (attempt $i/30)"
+        if $cli getinfo > /dev/null 2>&1; then return 0; fi
+        echo "  waiting for $name... ($i/30)"
         sleep 2
     done
-done
+    echo "ERROR: $name did not start" >&2; exit 1
+}
 
-SENDER_ID=$($LCLI_A getinfo | jq -r '.id')
-RECEIVER_ID=$($LCLI_B getinfo | jq -r '.id')
+mine() {
+    local n="$1"
+    $BCLI generatetoaddress "$n" "$($BCLI getnewaddress)" > /dev/null
+}
+
+truncate_raw_logs() {
+    for node in a b c d; do
+        docker exec "lntrace-cln-$node" truncate -s 0 "/root/.lightning/$RAW_FILE" 2>/dev/null || true
+    done
+    echo "  Truncated raw logs on all nodes"
+    sleep 1
+}
+
+copy_scenario_fixtures() {
+    local scenario_dir="$1"
+    mkdir -p "$scenario_dir"
+    for node in a b c d; do
+        LABEL=$(echo "$node" | tr '[:lower:]' '[:upper:]')
+        SRC="lntrace-cln-$node:/root/.lightning/$RAW_FILE"
+        docker cp "$SRC" "$scenario_dir/node-$LABEL-raw.jsonl" 2>/dev/null \
+            && echo "  Copied node $LABEL" \
+            || echo "  WARNING: no raw log from node $LABEL"
+    done
+}
+
+FIXTURE_DIR="$(cd "$(dirname "$0")/.." && pwd)/fixtures"
+
+# ── 0. Wait for all nodes ────────────────────────────────────────────
+echo "=== Waiting for nodes ==="
+wait_for_node "A" "$LCLI_A"
+wait_for_node "B" "$LCLI_B"
+wait_for_node "C" "$LCLI_C"
+wait_for_node "D" "$LCLI_D"
+
+ID_A=$($LCLI_A getinfo | jq -r '.id')
+ID_B=$($LCLI_B getinfo | jq -r '.id')
+ID_C=$($LCLI_C getinfo | jq -r '.id')
+ID_D=$($LCLI_D getinfo | jq -r '.id')
+echo "Node A: $ID_A"
+echo "Node B: $ID_B"
+echo "Node C: $ID_C"
+echo "Node D: $ID_D"
+
+# ── 1. Mine initial blocks and fund nodes ────────────────────────────
 echo ""
-echo "Sender ID:   $SENDER_ID"
-echo "Receiver ID: $RECEIVER_ID"
+echo "=== Setting up blockchain ==="
+$BCLI createwallet "default" 2>/dev/null || $BCLI loadwallet "default" 2>/dev/null || true
 
-# --- 1. Mine initial blocks and fund the sender ---
-echo ""
-echo "=== Creating bitcoind wallet ==="
-$BCLI createwallet "default" 2>/dev/null || $BCLI loadwallet "default" 2>/dev/null || echo "Wallet already loaded"
-
-echo "=== Mining initial blocks ==="
 BLOCKS=$($BCLI getblockcount)
 if [ "$BLOCKS" -lt 101 ]; then
     ADDR=$($BCLI getnewaddress)
@@ -36,120 +91,254 @@ if [ "$BLOCKS" -lt 101 ]; then
     echo "Mined 101 blocks"
 fi
 
-# Wait for CLN nodes to sync to the blockchain
-echo "Waiting for CLN nodes to sync..."
+# Wait for all nodes to sync
+echo "Syncing nodes to chain..."
 for i in $(seq 1 60); do
-    HEIGHT_A=$($LCLI_A getinfo | jq -r '.blockheight')
-    HEIGHT_B=$($LCLI_B getinfo | jq -r '.blockheight')
-    CHAIN_HEIGHT=$($BCLI getblockcount)
-    if [ "$HEIGHT_A" -ge "$CHAIN_HEIGHT" ] && [ "$HEIGHT_B" -ge "$CHAIN_HEIGHT" ]; then
-        echo "  Both nodes synced to block $CHAIN_HEIGHT"
+    HA=$($LCLI_A getinfo | jq -r '.blockheight')
+    HB=$($LCLI_B getinfo | jq -r '.blockheight')
+    HC=$($LCLI_C getinfo | jq -r '.blockheight')
+    HD=$($LCLI_D getinfo | jq -r '.blockheight')
+    CHAIN=$($BCLI getblockcount)
+    if [ "$HA" -ge "$CHAIN" ] && [ "$HB" -ge "$CHAIN" ] && [ "$HC" -ge "$CHAIN" ] && [ "$HD" -ge "$CHAIN" ]; then
+        echo "  All nodes at block $CHAIN"
         break
     fi
-    echo "  sender=$HEIGHT_A receiver=$HEIGHT_B chain=$CHAIN_HEIGHT (attempt $i/60)"
     sleep 2
 done
 
-# Fund the sender wallet
-echo "=== Funding sender wallet ==="
-SENDER_ADDR=$($LCLI_A newaddr | jq -r '.bech32')
-$BCLI sendtoaddress "$SENDER_ADDR" 1.0 > /dev/null
-$BCLI generatetoaddress 6 "$($BCLI getnewaddress)" > /dev/null
-echo "Sent 1 BTC to sender, mined 6 blocks"
+# Fund A (2 BTC — opens 2 channels), B (1 BTC), D (1 BTC)
+echo "Funding nodes..."
+ADDR_A=$($LCLI_A newaddr | jq -r '.bech32')
+ADDR_B=$($LCLI_B newaddr | jq -r '.bech32')
+ADDR_D=$($LCLI_D newaddr | jq -r '.bech32')
+$BCLI sendtoaddress "$ADDR_A" 2.0 > /dev/null
+$BCLI sendtoaddress "$ADDR_B" 1.0 > /dev/null
+$BCLI sendtoaddress "$ADDR_D" 1.0 > /dev/null
+mine 6
+echo "  Sent 2 BTC to A, 1 BTC each to B and D"
 
-# Wait for CLN to see the funds
-echo "Waiting for CLN to detect funds..."
-for i in $(seq 1 30); do
-    FUNDS=$($LCLI_A listfunds | jq '.outputs | length')
-    if [ "$FUNDS" -gt 0 ]; then
-        echo "  Sender has $FUNDS output(s)"
-        break
-    fi
-    echo "  no funds yet (attempt $i/30)"
-    sleep 2
+# Wait for funds to appear
+for node_label in "A:$LCLI_A" "B:$LCLI_B" "D:$LCLI_D"; do
+    IFS=: read -r name cli <<< "$node_label"
+    for i in $(seq 1 30); do
+        FUNDS=$($cli listfunds | jq '.outputs | length')
+        if [ "$FUNDS" -gt 0 ]; then break; fi
+        sleep 2
+    done
 done
-echo "Sender balance:"
-$LCLI_A listfunds | jq '{outputs: [.outputs[] | {amount_msat, status}]}'
 
-# --- 2. Connect and open channel ---
+# ── 2. Open channels: A→B, B→C, A→D, D→C ────────────────────────────
 echo ""
-echo "=== Connecting sender → receiver ==="
-$LCLI_A connect "$RECEIVER_ID@lntrace-cln-receiver:9735" | jq '.'
+echo "=== Opening channels ==="
 
-echo "=== Opening channel (1,000,000 sat) ==="
-FUND_RESULT=$($LCLI_A fundchannel "$RECEIVER_ID" 1000000)
-echo "$FUND_RESULT" | jq '.'
-TXID=$(echo "$FUND_RESULT" | jq -r '.txid')
+echo "Connecting A → B..."
+$LCLI_A connect "$ID_B@lntrace-cln-b:9735" > /dev/null 2>&1 || true
+echo "Opening A→B channel (1,000,000 sat)..."
+$LCLI_A fundchannel "$ID_B" 1000000 | jq '{txid, channel_id}'
 
-# Mine to confirm channel
-$BCLI generatetoaddress 6 "$($BCLI getnewaddress)" > /dev/null
-echo "Mined 6 blocks to confirm channel"
+echo "Connecting B → C..."
+$LCLI_B connect "$ID_C@lntrace-cln-c:9735" > /dev/null 2>&1 || true
+echo "Opening B→C channel (1,000,000 sat)..."
+$LCLI_B fundchannel "$ID_C" 1000000 | jq '{txid, channel_id}'
 
-# Wait for channel to be active
-echo "Waiting for channel to become active..."
-for i in $(seq 1 30); do
-    STATE=$($LCLI_A listpeerchannels | jq -r '.channels[0].state // "none"')
-    if [ "$STATE" = "CHANNELD_NORMAL" ]; then
-        echo "Channel active!"
+# Mine blocks to confirm change outputs before opening more channels from A and D
+mine 3
+echo "Mined 3 blocks to confirm change outputs"
+sleep 5  # let nodes process blocks and update wallet
+
+echo "Connecting A → D..."
+$LCLI_A connect "$ID_D@lntrace-cln-d:9735" > /dev/null 2>&1 || true
+echo "Opening A→D channel (1,000,000 sat)..."
+for attempt in $(seq 1 10); do
+    RESULT=$($LCLI_A fundchannel "$ID_D" 1000000 2>&1) && break
+    echo "  Retry $attempt: $(echo "$RESULT" | jq -r '.message // "unknown"' 2>/dev/null)"
+    sleep 3
+done
+echo "$RESULT" | jq '{txid, channel_id}'
+
+echo "Connecting D → C..."
+$LCLI_D connect "$ID_C@lntrace-cln-c:9735" > /dev/null 2>&1 || true
+echo "Opening D→C channel (1,000,000 sat)..."
+for attempt in $(seq 1 10); do
+    RESULT=$($LCLI_D fundchannel "$ID_C" 1000000 2>&1) && break
+    echo "  Retry $attempt: $(echo "$RESULT" | jq -r '.message // "unknown"' 2>/dev/null)"
+    sleep 3
+done
+echo "$RESULT" | jq '{txid, channel_id}'
+
+# Confirm channels
+mine 6
+echo "Mined 6 blocks to confirm channels"
+
+# Wait for all four channels to be CHANNELD_NORMAL
+echo "Waiting for channels to become active..."
+for i in $(seq 1 60); do
+    STATE_AB=$($LCLI_A listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_B"'")] | .[0].state // "none"')
+    STATE_BC=$($LCLI_B listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0].state // "none"')
+    STATE_AD=$($LCLI_A listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_D"'")] | .[0].state // "none"')
+    STATE_DC=$($LCLI_D listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0].state // "none"')
+    if [ "$STATE_AB" = "CHANNELD_NORMAL" ] && [ "$STATE_BC" = "CHANNELD_NORMAL" ] && \
+       [ "$STATE_AD" = "CHANNELD_NORMAL" ] && [ "$STATE_DC" = "CHANNELD_NORMAL" ]; then
+        echo "  All four channels active"
         break
     fi
-    echo "  state: $STATE (attempt $i/30)"
+    echo "  A→B:$STATE_AB B→C:$STATE_BC A→D:$STATE_AD D→C:$STATE_DC ($i/60)"
     sleep 2
 done
 
-$LCLI_A listpeerchannels | jq '.channels[] | {short_channel_id, state, spendable_msat, receivable_msat}'
-
-# --- 3. Send a successful payment ---
+# ── 3. Raise D's fees ────────────────────────────────────────────────
 echo ""
-echo "=== Test 1: Successful payment (50,000 sat) ==="
-INVOICE=$($LCLI_B invoice 50000000 "test-success-$(date +%s)" "lntrace test payment" | jq -r '.bolt11')
-echo "Invoice: ${INVOICE:0:40}..."
+echo "=== Setting D's fees high (5000 base + 1000ppm) ==="
+SCID_DC=$($LCLI_D listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0].short_channel_id // "none"')
+SCID_DA=$($LCLI_D listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_A"'")] | .[0].short_channel_id // "none"')
 
-PAY_RESULT=$($LCLI_A xpay "$INVOICE" 2>&1) || true
-echo "Pay result:"
-echo "$PAY_RESULT" | jq '.' 2>/dev/null || echo "$PAY_RESULT"
+echo "D→C scid: $SCID_DC"
+echo "D→A scid: $SCID_DA"
 
-PAYMENT_HASH=$(echo "$PAY_RESULT" | jq -r '.payment_hash // empty' 2>/dev/null)
-if [ -n "$PAYMENT_HASH" ]; then
+$LCLI_D setchannel "$SCID_DC" 5000 1000 | jq '{short_channel_id, fee_base_msat, fee_proportional_millionths}'
+$LCLI_D setchannel "$SCID_DA" 5000 1000 | jq '{short_channel_id, fee_base_msat, fee_proportional_millionths}'
+
+# ── 4. Wait for gossip ──────────────────────────────────────────────
+echo ""
+echo "=== Waiting for gossip ==="
+# Mine more blocks so channels get announced (need 6 confirmations)
+mine 6
+
+SCID_AB=$($LCLI_A listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_B"'")] | .[0].short_channel_id // "none"')
+SCID_BC=$($LCLI_B listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0].short_channel_id // "none"')
+SCID_AD=$($LCLI_A listpeerchannels | jq -r '[.channels[] | select(.peer_id == "'"$ID_D"'")] | .[0].short_channel_id // "none"')
+
+echo "A→B scid: $SCID_AB"
+echo "B→C scid: $SCID_BC"
+echo "A→D scid: $SCID_AD"
+echo "D→C scid: $SCID_DC"
+
+for i in $(seq 1 90); do
+    TOTAL=0
+    for scid in "$SCID_AB" "$SCID_BC" "$SCID_AD" "$SCID_DC"; do
+        DIRS=$($LCLI_A listchannels "$scid" 2>/dev/null | jq '.channels | length')
+        TOTAL=$((TOTAL + DIRS))
+    done
+    if [ "$TOTAL" -ge 8 ]; then
+        echo "  A sees all 4 channels in both directions ($TOTAL/8)"
+        break
+    fi
+    echo "  A sees $TOTAL/8 channel entries ($i/90)"
+    sleep 3
+done
+
+# Extra wait for D's fee update to propagate through gossip
+echo "Waiting for D's fee gossip to propagate..."
+sleep 10
+mine 1
+sleep 5
+
+# Verify A sees D's high fees
+D_FEE=$($LCLI_A listchannels "$SCID_DC" | jq '[.channels[] | select(.source == "'"$ID_D"'")] | .[0].fee_per_millionth // 0')
+echo "A sees D→C fee_per_millionth: $D_FEE (should be 1000)"
+
+# ── 5. Scenario 1: Success ──────────────────────────────────────────
+echo ""
+echo "=== Scenario 1: Success (A pays C 50k sat, expect route via B) ==="
+truncate_raw_logs
+sleep 3  # let initial listpeerchannels snapshots flush
+
+INVOICE_1=$($LCLI_C invoice 50000000 "success-$(date +%s)" "4node success" | jq -r '.bolt11')
+echo "Invoice: ${INVOICE_1:0:50}..."
+
+PAY_1=$($LCLI_A xpay "$INVOICE_1" 2>&1) || true
+echo "Result:"
+echo "$PAY_1" | jq '{payment_hash, status}' 2>/dev/null || echo "$PAY_1"
+
+sleep 3
+copy_scenario_fixtures "$FIXTURE_DIR/4node-success"
+
+# ── 6. Scenario 2: Reroute ──────────────────────────────────────────
+echo ""
+echo "=== Scenario 2: Reroute (drain B→C, then A pays C) ==="
+truncate_raw_logs
+sleep 3
+
+# Drain B→C (B pays C directly to empty B's outbound liquidity to C)
+echo "Draining B→C channel..."
+DRAIN1_INV=$($LCLI_C invoice 900000000 "drain-bc-$(date +%s)" "drain B→C" | jq -r '.bolt11')
+DRAIN1_RESULT=$($LCLI_B xpay "$DRAIN1_INV" 2>&1) || true
+echo "Drain B→C:"
+echo "$DRAIN1_RESULT" | jq '{payment_hash, status}' 2>/dev/null || echo "$DRAIN1_RESULT"
+sleep 2
+
+# Check B→C liquidity after drain
+echo ""
+echo "B→C liquidity after drain:"
+$LCLI_B listpeerchannels | jq '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0] | {spendable_msat, receivable_msat}'
+
+# A pays C — xpay should try B first (cheaper), fail, then retry via D
+echo ""
+echo "A pays C 50k sat (expect fail via B, retry via D)..."
+INVOICE_2=$($LCLI_C invoice 50000000 "reroute-$(date +%s)" "4node reroute" | jq -r '.bolt11')
+PAY_2=$($LCLI_A xpay "$INVOICE_2" 2>&1) || true
+echo "Result:"
+echo "$PAY_2" | jq '{payment_hash, status}' 2>/dev/null || echo "$PAY_2"
+
+sleep 3
+copy_scenario_fixtures "$FIXTURE_DIR/4node-reroute"
+
+# ── 7. Scenario 3: Total failure ────────────────────────────────────
+echo ""
+echo "=== Scenario 3: Total failure (drain D→C too, then A pays C) ==="
+truncate_raw_logs
+sleep 3
+
+# Drain D→C
+echo "Draining D→C channel..."
+DRAIN2_INV=$($LCLI_C invoice 900000000 "drain-dc-$(date +%s)" "drain D→C" | jq -r '.bolt11')
+DRAIN2_RESULT=$($LCLI_D xpay "$DRAIN2_INV" 2>&1) || true
+echo "Drain D→C:"
+echo "$DRAIN2_RESULT" | jq '{payment_hash, status}' 2>/dev/null || echo "$DRAIN2_RESULT"
+sleep 2
+
+# Check D→C liquidity after drain
+echo ""
+echo "D→C liquidity after drain:"
+$LCLI_D listpeerchannels | jq '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0] | {spendable_msat, receivable_msat}'
+
+# A pays C — both paths fail (100k sat exceeds combined spendable on both drained channels)
+echo ""
+echo "A pays C 100k sat (expect total failure)..."
+INVOICE_3=$($LCLI_C invoice 100000000 "allfail-$(date +%s)" "4node total failure" | jq -r '.bolt11')
+PAY_3=$($LCLI_A xpay "$INVOICE_3" 2>&1) || true
+echo "Result:"
+echo "$PAY_3" | jq '.' 2>/dev/null || echo "$PAY_3"
+
+sleep 3
+copy_scenario_fixtures "$FIXTURE_DIR/4node-allfail"
+
+# ── 8. Verification ─────────────────────────────────────────────────
+echo ""
+echo "=== Verification ==="
+for scenario in 4node-success 4node-reroute 4node-allfail; do
     echo ""
-    echo "SUCCESS payment_hash: $PAYMENT_HASH"
-fi
-
-# --- 4. Send a payment that will fail ---
-echo ""
-echo "=== Test 2: Failed payment (invoice to unknown node) ==="
-# Create an invoice for more than the channel can handle
-BIG_INVOICE=$($LCLI_B invoice 900000000 "test-fail-$(date +%s)" "should fail - too large" | jq -r '.bolt11')
-echo "Large invoice: ${BIG_INVOICE:0:40}..."
-
-# Drain most liquidity first by paying close to capacity
-DRAIN_INVOICE=$($LCLI_B invoice 800000000 "drain-$(date +%s)" "drain channel" | jq -r '.bolt11')
-DRAIN_RESULT=$($LCLI_A xpay "$DRAIN_INVOICE" 2>&1) || true
-echo "Drain result:"
-echo "$DRAIN_RESULT" | jq '.payment_hash' 2>/dev/null || echo "$DRAIN_RESULT"
-
-# Now try another payment that should fail due to insufficient liquidity
-echo ""
-echo "=== Test 3: Payment that fails (insufficient liquidity) ==="
-FAIL_INVOICE=$($LCLI_B invoice 150000000 "test-fail2-$(date +%s)" "should fail - no liquidity" | jq -r '.bolt11')
-FAIL_RESULT=$($LCLI_A xpay "$FAIL_INVOICE" 2>&1) || true
-echo "Fail result:"
-echo "$FAIL_RESULT" | jq '.' 2>/dev/null || echo "$FAIL_RESULT"
-
-# --- 5. Copy raw recorder output ---
-echo ""
-echo "=== Captured data ==="
-echo "Checking for recorder output..."
-docker exec lntrace-cln-sender sh -c "ls -la /home/clightning/.lightning/regtest/lntrace-raw.jsonl 2>/dev/null || echo 'no recorder output yet'"
-docker exec lntrace-cln-sender sh -c "wc -l /home/clightning/.lightning/regtest/lntrace-raw.jsonl 2>/dev/null || echo '0 lines'"
-
-echo ""
-echo "=== Copying fixtures to host ==="
-docker cp lntrace-cln-sender:/home/clightning/.lightning/regtest/lntrace-raw.jsonl ./fixtures/cln-regtest-raw.jsonl 2>/dev/null || echo "No raw file to copy"
+    echo "--- $scenario ---"
+    for node in A B C D; do
+        f="$FIXTURE_DIR/$scenario/node-$node-raw.jsonl"
+        if [ -f "$f" ]; then
+            LINES=$(wc -l < "$f")
+            TOPICS=$(grep -oP '"topic":"[^"]*"' "$f" 2>/dev/null | sort | uniq -c | sort -rn | head -5)
+            echo "  node-$node: $LINES lines"
+            echo "$TOPICS" | sed 's/^/    /'
+        else
+            echo "  node-$node: MISSING"
+        fi
+    done
+done
 
 echo ""
 echo "=== Done ==="
-echo "Raw fixture: fixtures/cln-regtest-raw.jsonl"
+echo "Fixtures saved to:"
+echo "  $FIXTURE_DIR/4node-success/"
+echo "  $FIXTURE_DIR/4node-reroute/"
+echo "  $FIXTURE_DIR/4node-allfail/"
 echo ""
-echo "To inspect: cat fixtures/cln-regtest-raw.jsonl | jq ."
-echo "To view sender log: docker exec lntrace-cln-sender cat /home/clightning/.lightning/debug.log | tail -50"
+echo "Run golden tests:"
+echo "  cargo test -p lntrace-cln -- --ignored"
+echo "  cargo insta review -p lntrace-cln"

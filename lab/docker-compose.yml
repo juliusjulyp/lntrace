@@ -28,60 +28,113 @@ services:
     volumes:
       - plugin-bin:/plugins
     entrypoint: ["sh", "-c", "cp /plugins/* /out/ 2>/dev/null; echo 'plugins ready'; ls -la /plugins/"]
-    # This container exits after copying. That's fine.
 
-  # --- CLN Node A (sender, with lntrace recorder) ---
-  cln-sender:
-    image: polarlightning/clightning:25.02
-    container_name: lntrace-cln-sender
+  # --- Node A (sender) ---
+  cln-a:
+    image: elementsproject/lightningd:v26.06.8
+    container_name: lntrace-cln-a
     depends_on:
       bitcoind:
         condition: service_started
       plugin-builder:
         condition: service_completed_successfully
+    entrypoint: ["lightningd"]
     command:
-      - lightningd
       - --network=regtest
-      - --alias=lntrace-sender
+      - --alias=node-A
       - --bitcoin-rpcuser=lntrace
       - --bitcoin-rpcpassword=lntrace
       - --bitcoin-rpcconnect=bitcoind
       - --bitcoin-rpcport=18443
       - --log-level=debug
-      - --log-file=/home/clightning/.lightning/debug.log
-      - --plugin=/plugins/lntrace-cln-recorder
+      - --log-file=/root/.lightning/debug.log
+      - --plugin=/plugins/lntrace-cln-record
       - --addr=0.0.0.0:9735
     volumes:
-      - cln-sender-data:/home/clightning/.lightning
+      - cln-a-data:/root/.lightning
       - plugin-bin:/plugins:ro
-      - fixture-data:/fixtures
     ports:
       - "9735:9735"
 
-  # --- CLN Node B (receiver) ---
-  cln-receiver:
-    image: polarlightning/clightning:25.02
-    container_name: lntrace-cln-receiver
+  # --- Node B (intermediate) ---
+  cln-b:
+    image: elementsproject/lightningd:v26.06.8
+    container_name: lntrace-cln-b
     depends_on:
       bitcoind:
         condition: service_started
+      plugin-builder:
+        condition: service_completed_successfully
+    entrypoint: ["lightningd"]
     command:
-      - lightningd
       - --network=regtest
-      - --alias=lntrace-receiver
+      - --alias=node-B
       - --bitcoin-rpcuser=lntrace
       - --bitcoin-rpcpassword=lntrace
       - --bitcoin-rpcconnect=bitcoind
       - --bitcoin-rpcport=18443
       - --log-level=debug
-      - --log-file=/home/clightning/.lightning/debug.log
+      - --log-file=/root/.lightning/debug.log
+      - --plugin=/plugins/lntrace-cln-record
       - --addr=0.0.0.0:9735
     volumes:
-      - cln-receiver-data:/home/clightning/.lightning
+      - cln-b-data:/root/.lightning
+      - plugin-bin:/plugins:ro
+
+  # --- Node C (receiver) ---
+  cln-c:
+    image: elementsproject/lightningd:v26.06.8
+    container_name: lntrace-cln-c
+    depends_on:
+      bitcoind:
+        condition: service_started
+      plugin-builder:
+        condition: service_completed_successfully
+    entrypoint: ["lightningd"]
+    command:
+      - --network=regtest
+      - --alias=node-C
+      - --bitcoin-rpcuser=lntrace
+      - --bitcoin-rpcpassword=lntrace
+      - --bitcoin-rpcconnect=bitcoind
+      - --bitcoin-rpcport=18443
+      - --log-level=debug
+      - --log-file=/root/.lightning/debug.log
+      - --plugin=/plugins/lntrace-cln-record
+      - --addr=0.0.0.0:9735
+    volumes:
+      - cln-c-data:/root/.lightning
+      - plugin-bin:/plugins:ro
+
+  # --- Node D (alternate intermediate) ---
+  cln-d:
+    image: elementsproject/lightningd:v26.06.8
+    container_name: lntrace-cln-d
+    depends_on:
+      bitcoind:
+        condition: service_started
+      plugin-builder:
+        condition: service_completed_successfully
+    entrypoint: ["lightningd"]
+    command:
+      - --network=regtest
+      - --alias=node-D
+      - --bitcoin-rpcuser=lntrace
+      - --bitcoin-rpcpassword=lntrace
+      - --bitcoin-rpcconnect=bitcoind
+      - --bitcoin-rpcport=18443
+      - --log-level=debug
+      - --log-file=/root/.lightning/debug.log
+      - --plugin=/plugins/lntrace-cln-record
+      - --addr=0.0.0.0:9735
+    volumes:
+      - cln-d-data:/root/.lightning
+      - plugin-bin:/plugins:ro
 
 volumes:
   bitcoind-data:
-  cln-sender-data:
-  cln-receiver-data:
+  cln-a-data:
+  cln-b-data:
+  cln-c-data:
+  cln-d-data:
   plugin-bin:
-  fixture-data:

@@ -1,0 +1,64 @@
+---
+source: adapters/cln/tests/golden_correlator.rs
+expression: traces
+---
+- payment_hash: 63fef282d588b839ecb1d3c7af2084cefeda33e1c11c7384f71f5a91d74f40a4
+  attempts:
+    - groupid: 7091351526805766228
+      partid: 1
+      hops:
+        - index: 0
+          node_id: 038c933c07a19647d29e5c28675fcd8398c17c9cf2b9bf51c8f556ac868bb8b263
+          amount_msat: 50000501
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02386f204a979dca3bb313c21ad6e208237b639d6506217e31baa3c8545990ee31
+          amount_msat: 50000000
+          fee_msat: 501
+          confidence: exact
+      success: true
+      duration_secs: 0.601200752
+  success: true
+- payment_hash: 91cd1c305ca24e94715d9bd7ee30a1ead05472e9df58554f4f07547e8549ce6c
+  attempts:
+    - groupid: 8440144868456788290
+      partid: 1
+      hops:
+        - index: 0
+          node_id: 02386f204a979dca3bb313c21ad6e208237b639d6506217e31baa3c8545990ee31
+          amount_msat: 900000000
+          fee_msat: 0
+          confidence: exact
+      success: true
+      duration_secs: 0.334275814
+  success: true
+- payment_hash: 8bcff3b040216f715ba8af7980f0b818d4733cd209db330f9f3e44b287fb8e7e
+  attempts:
+    - groupid: 7206052332955068589
+      partid: 1
+      hops:
+        - index: 0
+          node_id: 038c933c07a19647d29e5c28675fcd8398c17c9cf2b9bf51c8f556ac868bb8b263
+          amount_msat: 50000501
+          fee_msat: 0
+          confidence: exact
+        - index: 1
+          node_id: 02386f204a979dca3bb313c21ad6e208237b639d6506217e31baa3c8545990ee31
+          amount_msat: 50000000
+          fee_msat: 501
+          confidence: exact
+          failure:
+            sender_failcode: 4103
+            local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
+      success: false
+      failure:
+        failcode: 4103
+        erring_node: 038c933c07a19647d29e5c28675fcd8398c17c9cf2b9bf51c8f556ac868bb8b263
+        explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
+      duration_secs: 0.475185391
+  success: false
+  failure:
+    failcode: 4103
+    erring_node: 038c933c07a19647d29e5c28675fcd8398c17c9cf2b9bf51c8f556ac868bb8b263
+    explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."

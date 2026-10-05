@@ -1,13 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/lntrace-core",
-    "crates/lntrace-collector",
-    "crates/lntrace-correlator",
-    "crates/lntrace-explain",
+    "crates/lntrace",
     "crates/lntrace-cli",
     "adapters/cln",
-    "adapters/ldk",
 ]
 
 [workspace.package]
@@ -16,10 +12,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-lntrace-core = { path = "crates/lntrace-core" }
-lntrace-collector = { path = "crates/lntrace-collector" }
-lntrace-correlator = { path = "crates/lntrace-correlator" }
-lntrace-explain = { path = "crates/lntrace-explain" }
+lntrace = { path = "crates/lntrace" }
+lntrace-cln = { path = "adapters/cln" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -27,5 +21,7 @@ anyhow = "1"
 async-trait = "0.1"
 futures = "0.3"
 clap = { version = "4", features = ["derive"] }
-cln-plugin = "0.2"
-cln-rpc = "0.2"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+cln-plugin = "0.7"
+cln-rpc = "0.7"
