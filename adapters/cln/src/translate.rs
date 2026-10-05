@@ -7,8 +7,8 @@ use cln_rpc::model::responses::ListpeerchannelsResponse;
 use cln_rpc::notifications::{
     ChannelOpenedNotification, ChannelStateChangedCause, ChannelStateChangedNotification,
     ForwardEventNotification, ForwardEventStatus, InvoicePaymentNotification,
-    PayPartEndNotification, PayPartEndStatus, PayPartStartNotification,
-    SendPayFailureNotification, SendPaySuccessNotification,
+    PayPartEndNotification, PayPartEndStatus, PayPartStartNotification, SendPayFailureNotification,
+    SendPaySuccessNotification,
 };
 use cln_rpc::primitives::ChannelState;
 use lntrace::*;
@@ -38,8 +38,7 @@ pub fn translate(topic: &str, payload: &Value) -> Option<TraceEvent> {
 }
 
 fn translate_forward_event(v: &Value) -> Option<TraceEvent> {
-    let fe: ForwardEventNotification =
-        serde_json::from_value(v["forward_event"].clone()).ok()?;
+    let fe: ForwardEventNotification = serde_json::from_value(v["forward_event"].clone()).ok()?;
 
     let status = match fe.status {
         ForwardEventStatus::OFFERED => ForwardStatus::Offered,
@@ -68,8 +67,7 @@ fn translate_forward_event(v: &Value) -> Option<TraceEvent> {
 }
 
 fn translate_pay_part_start(v: &Value) -> Option<TraceEvent> {
-    let pps: PayPartStartNotification =
-        serde_json::from_value(v["pay_part_start"].clone()).ok()?;
+    let pps: PayPartStartNotification = serde_json::from_value(v["pay_part_start"].clone()).ok()?;
 
     Some(TraceEvent::PaymentPathAttempt {
         payment_hash: pps.payment_hash.to_string(),
@@ -94,8 +92,7 @@ fn translate_pay_part_start(v: &Value) -> Option<TraceEvent> {
 }
 
 fn translate_pay_part_end(v: &Value) -> Option<TraceEvent> {
-    let ppe: PayPartEndNotification =
-        serde_json::from_value(v["pay_part_end"].clone()).ok()?;
+    let ppe: PayPartEndNotification = serde_json::from_value(v["pay_part_end"].clone()).ok()?;
 
     Some(TraceEvent::PaymentPathResult {
         payment_hash: ppe.payment_hash.to_string(),
@@ -156,8 +153,7 @@ fn translate_invoice_payment(v: &Value) -> Option<TraceEvent> {
 }
 
 fn translate_channel_opened(v: &Value) -> Option<TraceEvent> {
-    let co: ChannelOpenedNotification =
-        serde_json::from_value(v["channel_opened"].clone()).ok()?;
+    let co: ChannelOpenedNotification = serde_json::from_value(v["channel_opened"].clone()).ok()?;
 
     Some(TraceEvent::ChannelReady {
         channel: ChannelId {
@@ -214,7 +210,8 @@ pub fn translate_listpeerchannels(resp: &ListpeerchannelsResponse) -> Vec<Channe
                 remote_msat: ch
                     .total_msat
                     .and_then(|total| {
-                        ch.to_us_msat.map(|local| total.msat().saturating_sub(local.msat()))
+                        ch.to_us_msat
+                            .map(|local| total.msat().saturating_sub(local.msat()))
                     })
                     .unwrap_or(0),
                 active: ch.state == ChannelState::CHANNELD_NORMAL && ch.peer_connected,
@@ -224,10 +221,7 @@ pub fn translate_listpeerchannels(resp: &ListpeerchannelsResponse) -> Vec<Channe
                 receivable_msat: ch.receivable_msat.map(|a| a.msat()),
                 minimum_htlc_out_msat: ch.minimum_htlc_out_msat.map(|a| a.msat()),
                 max_accepted_htlcs: ch.max_accepted_htlcs,
-                inflight_htlc_count: ch
-                    .htlcs
-                    .as_ref()
-                    .map(|htlcs| htlcs.len() as u32),
+                inflight_htlc_count: ch.htlcs.as_ref().map(|htlcs| htlcs.len() as u32),
             })
         })
         .collect()

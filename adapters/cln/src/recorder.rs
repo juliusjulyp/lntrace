@@ -148,7 +148,11 @@ async fn do_poll(
     previous_json: &mut Option<String>,
     force: bool,
 ) {
-    let req = ListpeerchannelsRequest { id: None, channel_id: None, short_channel_id: None };
+    let req = ListpeerchannelsRequest {
+        id: None,
+        channel_id: None,
+        short_channel_id: None,
+    };
     match rpc.call_typed(&req).await {
         Ok(resp) => {
             let payload = serde_json::to_value(&resp).unwrap_or_default();

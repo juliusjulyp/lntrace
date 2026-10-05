@@ -52,9 +52,9 @@ async fn load_directory(dir: &Path) -> Result<LoadResult> {
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name()
-                .and_then(|f| f.to_str())
-                .map_or(false, |f| f.starts_with("node-") && f.ends_with("-raw.jsonl"))
+            p.file_name().and_then(|f| f.to_str()).map_or(false, |f| {
+                f.starts_with("node-") && f.ends_with("-raw.jsonl")
+            })
         })
         .collect();
     paths.sort();

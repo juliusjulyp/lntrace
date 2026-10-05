@@ -28,8 +28,7 @@ fn load_fixture_file(path: &Path) -> Vec<RawEntry> {
 
 /// Build envelopes and aliases from a fixture directory.
 fn load_reroute() -> (Vec<Envelope>, HashMap<String, String>) {
-    let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/4node-reroute");
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/4node-reroute");
     let nodes = ["A", "B", "C", "D"];
     let mut envelopes = Vec::new();
     let mut aliases = HashMap::new();

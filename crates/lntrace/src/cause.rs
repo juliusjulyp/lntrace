@@ -90,9 +90,7 @@ pub fn infer_cause(
         if inflight >= max {
             return Some(InferredCause {
                 rule: CauseRule::TooManyHtlcs,
-                description: format!(
-                    "too many in-flight HTLCs ({inflight} in flight, max {max})"
-                ),
+                description: format!("too many in-flight HTLCs ({inflight} in flight, max {max})"),
             });
         }
     }

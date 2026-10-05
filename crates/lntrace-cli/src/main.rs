@@ -171,9 +171,10 @@ async fn cmd_replay(path: &Path) -> Result<()> {
 
     for trace in &traces {
         let status = if trace.success { "OK" } else { "FAIL" };
-        let amt = trace.attempts.first().map_or(0, |a| {
-            a.hops.last().map_or(0, |h| h.amount_msat / 1000)
-        });
+        let amt = trace
+            .attempts
+            .first()
+            .map_or(0, |a| a.hops.last().map_or(0, |h| h.amount_msat / 1000));
         println!(
             "  {} [{status}] — {amt} sat — {} attempt(s)",
             trace.payment_hash,

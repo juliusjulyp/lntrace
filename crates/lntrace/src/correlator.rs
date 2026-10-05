@@ -1,6 +1,5 @@
 use crate::{
-    cause, ChannelSnapshot, Confidence, Envelope, ForwardStatus, NodeId, ShortChannelId,
-    TraceEvent,
+    cause, ChannelSnapshot, Confidence, Envelope, ForwardStatus, NodeId, ShortChannelId, TraceEvent,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -158,14 +157,12 @@ fn find_snapshot_after<'a>(
     scid: ShortChannelId,
     min_seq: u64,
 ) -> Option<&'a ChannelSnapshot> {
-    snapshots
-        .get(&(node_id.clone(), scid))
-        .and_then(|entries| {
-            entries
-                .iter()
-                .find(|(seq, _)| *seq >= min_seq)
-                .map(|(_, snap)| snap)
-        })
+    snapshots.get(&(node_id.clone(), scid)).and_then(|entries| {
+        entries
+            .iter()
+            .find(|(seq, _)| *seq >= min_seq)
+            .map(|(_, snap)| snap)
+    })
 }
 
 /// Shard key for pairing attempts with results.
@@ -176,11 +173,7 @@ type ShardKey = (Option<u64>, Option<u64>);
 /// Pairs each PaymentPathAttempt with its PaymentPathResult by (groupid, partid).
 /// Merges ForwardEvent data from intermediate nodes by matching on out_channel
 /// scid + direction, and verifies the forward comes from the erring node.
-fn build_trace(
-    payment_hash: &str,
-    envs: &[&Envelope],
-    snapshots: &SnapshotIndex,
-) -> Option<Trace> {
+fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex) -> Option<Trace> {
     // Collect attempts and results keyed by (groupid, partid).
     let mut attempts_by_shard: HashMap<ShardKey, &Vec<crate::Hop>> = HashMap::new();
     let mut results_by_shard: HashMap<ShardKey, ResultInfo> = HashMap::new();
@@ -286,10 +279,8 @@ fn build_trace(
                                     .as_ref()
                                     .and_then(|node| {
                                         let scid = hop.channel.scid?;
-                                        let min_seq = fwd_match
-                                            .as_ref()
-                                            .map(|m| m.node_seq)
-                                            .unwrap_or(0);
+                                        let min_seq =
+                                            fwd_match.as_ref().map(|m| m.node_seq).unwrap_or(0);
                                         find_snapshot_after(snapshots, node, scid, min_seq)
                                     })
                                     .and_then(|snap| {

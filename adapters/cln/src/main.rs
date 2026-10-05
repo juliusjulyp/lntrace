@@ -105,11 +105,7 @@ notification_handler!(on_channel_state_changed, "channel_state_changed");
 ///
 /// Full snapshot at startup and after triggered polls (e.g. local_failed).
 /// Periodic polls only emit channels that changed since the last snapshot.
-async fn poll_channels(
-    rpc_path: PathBuf,
-    state: State,
-    poll_interval_secs: u64,
-) {
+async fn poll_channels(rpc_path: PathBuf, state: State, poll_interval_secs: u64) {
     let mut rpc = match cln_rpc::ClnRpc::new(&rpc_path).await {
         Ok(rpc) => rpc,
         Err(e) => {
@@ -139,7 +135,11 @@ async fn do_poll(
     previous: &mut HashMap<Option<lntrace::ShortChannelId>, lntrace::ChannelSnapshot>,
     full: bool,
 ) {
-    let req = ListpeerchannelsRequest { id: None, channel_id: None, short_channel_id: None };
+    let req = ListpeerchannelsRequest {
+        id: None,
+        channel_id: None,
+        short_channel_id: None,
+    };
     match rpc.call_typed(&req).await {
         Ok(resp) => {
             let channels = translate::translate_listpeerchannels(&resp);

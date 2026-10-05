@@ -3,8 +3,8 @@
 //! Reads raw recorder fixtures from `fixtures/node-{A,B,C}-raw.jsonl`,
 //! translates each notification, and verifies the output against known values.
 
-use lntrace_cln::translate::translate;
 use lntrace::*;
+use lntrace_cln::translate::translate;
 use serde_json::Value;
 use std::path::Path;
 
@@ -168,21 +168,14 @@ fn pay_part_end_failure_with_erring_hop() {
         } => {
             assert!(!success, "status=failure should map to success=false");
             assert_eq!(*failcode, Some(4103)); // 0x1007 = temporary_channel_failure
-            // Erring node is B
-            assert!(erring_node
-                .as_ref()
-                .unwrap()
-                .0
-                .starts_with("038c933c"));
+                                               // Erring node is B
+            assert!(erring_node.as_ref().unwrap().0.starts_with("038c933c"));
             // Erring channel is B->C: 108x1x0
             assert_eq!(
                 erring_channel.as_ref().unwrap().scid.unwrap().to_string(),
                 "108x1x0"
             );
-            assert_eq!(
-                error_message.as_deref(),
-                Some("temporary_channel_failure")
-            );
+            assert_eq!(error_message.as_deref(), Some("temporary_channel_failure"));
         }
         other => panic!("expected PaymentPathResult, got {other:?}"),
     }
@@ -198,8 +191,7 @@ fn invoice_payment_computes_payment_hash_from_preimage() {
         .find(|e| e.topic == "invoice_payment")
         .expect("no invoice_payment in node-C fixtures");
 
-    let event =
-        translate(&entry.topic, &entry.payload).expect("invoice_payment should translate");
+    let event = translate(&entry.topic, &entry.payload).expect("invoice_payment should translate");
 
     match &event {
         TraceEvent::PaymentReceived {
@@ -282,7 +274,10 @@ fn forward_event_local_failed_has_failcode() {
         } => {
             assert_eq!(*status, ForwardStatus::LocalFailed);
             assert_eq!(*failcode, Some(4103));
-            assert_eq!(failreason.as_deref(), Some("WIRE_TEMPORARY_CHANNEL_FAILURE"));
+            assert_eq!(
+                failreason.as_deref(),
+                Some("WIRE_TEMPORARY_CHANNEL_FAILURE")
+            );
             assert!(payment_hash.is_some());
         }
         other => panic!("expected ForwardEvent, got {other:?}"),

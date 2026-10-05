@@ -54,15 +54,9 @@ pub struct TraceListEntry {
 /// Extracts nodes from all envelope `node_id` fields and channels from
 /// the latest `Snapshot` event per node. When two nodes report the same
 /// scid, their perspectives are merged into one `GraphChannel`.
-pub fn build_graph(
-    envelopes: &[Envelope],
-    aliases: &HashMap<String, String>,
-) -> GraphResponse {
+pub fn build_graph(envelopes: &[Envelope], aliases: &HashMap<String, String>) -> GraphResponse {
     // Collect instrumented node_ids (nodes that submitted envelopes).
-    let instrumented_ids: HashSet<String> = envelopes
-        .iter()
-        .map(|e| e.node_id.0.clone())
-        .collect();
+    let instrumented_ids: HashSet<String> = envelopes.iter().map(|e| e.node_id.0.clone()).collect();
 
     // Also collect peer node_ids from channel snapshots.
     let mut all_node_ids: HashSet<String> = instrumented_ids.clone();

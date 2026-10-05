@@ -135,8 +135,15 @@ fn golden_4node_success() {
     assert!(!traces.is_empty(), "no traces produced");
 
     // Should contain a single successful payment via B.
-    let main_trace = traces.iter().find(|t| t.success).expect("expected a successful trace");
-    assert_eq!(main_trace.attempts.len(), 1, "success should have exactly 1 attempt");
+    let main_trace = traces
+        .iter()
+        .find(|t| t.success)
+        .expect("expected a successful trace");
+    assert_eq!(
+        main_trace.attempts.len(),
+        1,
+        "success should have exactly 1 attempt"
+    );
     assert!(main_trace.attempts[0].success);
 
     insta::assert_yaml_snapshot!("4node_success_traces", traces);
@@ -199,13 +206,21 @@ fn golden_4node_reroute() {
     let erring_node = a0.failure.as_ref().unwrap().erring_node.as_ref().unwrap();
 
     // Find the PaymentPathAttempt for this payment's failing attempt.
-    let attempt_env = envelopes.iter().find(|env| {
-        if let TraceEvent::PaymentPathAttempt { payment_hash, groupid, .. } = &env.event {
-            payment_hash == &reroute_trace.payment_hash && *groupid == a0.groupid
-        } else {
-            false
-        }
-    }).expect("expected PaymentPathAttempt envelope for failing attempt");
+    let attempt_env = envelopes
+        .iter()
+        .find(|env| {
+            if let TraceEvent::PaymentPathAttempt {
+                payment_hash,
+                groupid,
+                ..
+            } = &env.event
+            {
+                payment_hash == &reroute_trace.payment_hash && *groupid == a0.groupid
+            } else {
+                false
+            }
+        })
+        .expect("expected PaymentPathAttempt envelope for failing attempt");
 
     // Extract the route hop for the failing channel (hop at failing_hop.index).
     let route_hop = match &attempt_env.event {
@@ -216,9 +231,12 @@ fn golden_4node_reroute() {
     let route_scid = route_hop.channel.scid.expect("route hop should have scid");
 
     // Find B's snapshot and look up the same scid.
-    let b_snapshot_env = envelopes.iter().find(|env| {
-        env.node_id == *erring_node && matches!(&env.event, TraceEvent::Snapshot { .. })
-    }).expect("expected a Snapshot envelope from B");
+    let b_snapshot_env = envelopes
+        .iter()
+        .find(|env| {
+            env.node_id == *erring_node && matches!(&env.event, TraceEvent::Snapshot { .. })
+        })
+        .expect("expected a Snapshot envelope from B");
 
     let snap_ch = match &b_snapshot_env.event {
         TraceEvent::Snapshot { channels } => channels
