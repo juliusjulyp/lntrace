@@ -14,6 +14,7 @@
 //! Output goes to `lntrace-raw.jsonl` in the CLN network data directory.
 
 use anyhow::Result;
+use cln_plugin::options::StringConfigOption;
 use cln_plugin::{Builder, Plugin};
 use cln_rpc::model::requests::ListpeerchannelsRequest;
 use serde_json::Value;
@@ -23,10 +24,16 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, Notify};
 
+/// CLN option: full path for the recorder's output file.
+/// When not set, defaults to `lntrace-raw.jsonl` in the CLN data directory.
+const OPT_LOG: StringConfigOption = StringConfigOption::new_str_no_default(
+    "lntrace-log",
+    "Output path for lntrace raw JSONL (default: lntrace-raw.jsonl in CLN dir)",
+);
+
 #[derive(Clone)]
 struct State {
-    file: Arc<Mutex<Option<tokio::fs::File>>>,
-    path: PathBuf,
+    path: Arc<Mutex<PathBuf>>,
     /// Node public key, set after init via getinfo RPC.
     node_id: Arc<Mutex<String>>,
     /// Node alias from lightningd config.
@@ -48,19 +55,15 @@ impl State {
             "payload": payload,
         });
 
-        let mut guard = self.file.lock().await;
-        let file = match guard.as_mut() {
-            Some(f) => f,
-            None => {
-                let f = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&self.path)
-                    .await?;
-                *guard = Some(f);
-                guard.as_mut().unwrap()
-            }
-        };
+        // Open-write-close on each call so that external truncation or
+        // deletion (e.g. `rm -f` on the host) doesn't leave us writing
+        // to a phantom inode.
+        let path = self.path.lock().await;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&*path)
+            .await?;
 
         let mut buf = serde_json::to_string(&line)?;
         buf.push('\n');
@@ -74,9 +77,7 @@ impl State {
 
 /// forward_event handler with poll trigger on local_failed.
 async fn on_forward_event(p: Plugin<State>, v: Value) -> Result<()> {
-    let is_local_failed = v["forward_event"]["status"]
-        .as_str()
-        .map_or(false, |s| s == "local_failed");
+    let is_local_failed = v["forward_event"]["status"].as_str() == Some("local_failed");
 
     p.state().record("forward_event", &v).await?;
 
@@ -159,10 +160,8 @@ async fn do_poll(
             let current_json = serde_json::to_string(&payload).unwrap_or_default();
 
             // On periodic polls, skip if nothing changed.
-            if !force {
-                if previous_json.as_ref() == Some(&current_json) {
-                    return;
-                }
+            if !force && previous_json.as_ref() == Some(&current_json) {
+                return;
             }
 
             previous_json.replace(current_json);
@@ -180,14 +179,14 @@ async fn do_poll(
 #[tokio::main]
 async fn main() -> Result<()> {
     let state = State {
-        file: Arc::new(Mutex::new(None)),
-        path: PathBuf::from("lntrace-raw.jsonl"),
+        path: Arc::new(Mutex::new(PathBuf::from("lntrace-raw.jsonl"))),
         node_id: Arc::new(Mutex::new("pending".to_string())),
         alias: Arc::new(Mutex::new("pending".to_string())),
         poll_trigger: Arc::new(Notify::new()),
     };
 
     if let Some(plugin) = Builder::new(tokio::io::stdin(), tokio::io::stdout())
+        .option(OPT_LOG)
         .subscribe("forward_event", on_forward_event)
         .subscribe("sendpay_success", on_sendpay_success)
         .subscribe("sendpay_failure", on_sendpay_failure)
@@ -199,28 +198,36 @@ async fn main() -> Result<()> {
         .start(state)
         .await?
     {
-        // Resolve node identity via getinfo RPC.
+        // Apply --lntrace-log option if provided.
+        if let Ok(Some(log_path)) = plugin.option(&OPT_LOG) {
+            let path: PathBuf = log_path.into();
+            // Create parent directory if needed.
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            // Swap in the new path (no file has been opened yet at this point).
+            *plugin.state().path.lock().await = path;
+        }
+        // Resolve node identity via getinfo RPC before starting the
+        // channel poller, so the first recorded entry already has the
+        // correct node_id and alias.
         let config = plugin.configuration();
         let rpc_path = PathBuf::from(&config.lightning_dir).join(&config.rpc_file);
-        let node_id_ref = plugin.state().node_id.clone();
-        let alias_ref = plugin.state().alias.clone();
-
-        let rpc_path_getinfo = rpc_path.clone();
-        tokio::spawn(async move {
-            match cln_rpc::ClnRpc::new(&rpc_path_getinfo).await {
+        {
+            match cln_rpc::ClnRpc::new(&rpc_path).await {
                 Ok(mut rpc) => {
                     let req = cln_rpc::model::requests::GetinfoRequest {};
                     match rpc.call_typed(&req).await {
                         Ok(info) => {
-                            *node_id_ref.lock().await = info.id.to_string();
-                            *alias_ref.lock().await = info.alias;
+                            *plugin.state().node_id.lock().await = info.id.to_string();
+                            *plugin.state().alias.lock().await = info.alias;
                         }
                         Err(e) => eprintln!("lntrace-record: getinfo failed: {e}"),
                     }
                 }
                 Err(e) => eprintln!("lntrace-record: RPC connect failed: {e}"),
             }
-        });
+        }
 
         // Start channel polling (every 2 seconds).
         let poll_state = plugin.state().clone();

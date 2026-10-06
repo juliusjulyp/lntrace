@@ -2,18 +2,18 @@
 source: adapters/cln/tests/golden_graph.rs
 expression: reroute_trace
 ---
-payment_hash: d6e731d11f9f40b1d9564a04ab058a6c1f312926c77cfa938146bfa14dda0b0c
+payment_hash: 2e1490ff04676db9fdbfedad9f1fd12e6d83530540b100712764d9761eaf69d1
 attempts:
-  - groupid: 7074241625330022270
+  - groupid: 6632833030942812446
     partid: 1
     hops:
       - index: 0
-        node_id: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+        node_id: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
         amount_msat: 50000501
         fee_msat: 0
         confidence: exact
       - index: 1
-        node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+        node_id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
         amount_msat: 50000000
         fee_msat: 501
         confidence: exact
@@ -21,25 +21,25 @@ attempts:
           sender_failcode: 4103
           local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
           inferred_cause: "insufficient outbound liquidity (spendable 35694000 msat, HTLC requested 50000000 msat)"
-    success: false
+    outcome: failed
     failure:
       failcode: 4103
-      erring_node: 03a679f6d264f054ca24cc469ec2939cc5c03965a556ebf8047b96d282e4ca9724
+      erring_node: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
       explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
-    duration_secs: 0.353106758
-  - groupid: 7074241625330022270
+    duration_secs: 0.430389706
+  - groupid: 6632833030942812446
     partid: 2
     hops:
       - index: 0
-        node_id: 03eff35779d928f687a0cd2839a557f06fbfc5c369f360d1c12033295d379ba469
+        node_id: 021c444a94d762e244adca668882a1086b069a13081aeebd7a2208685df1a3440b
         amount_msat: 50055000
         fee_msat: 0
         confidence: exact
       - index: 1
-        node_id: 02b7629c77973b95e679f456d852412f0ecd97f1ee1ff8b4e959d05b2f8f1defde
+        node_id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
         amount_msat: 50000000
         fee_msat: 55000
         confidence: exact
-    success: true
-    duration_secs: 0.464699084
+    outcome: succeeded
+    duration_secs: 0.609048999
 success: true

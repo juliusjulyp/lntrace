@@ -22,7 +22,8 @@ LCLI_B="docker exec lntrace-cln-b lightning-cli --network=regtest"
 LCLI_C="docker exec lntrace-cln-c lightning-cli --network=regtest"
 LCLI_D="docker exec lntrace-cln-d lightning-cli --network=regtest"
 
-RAW_FILE="regtest/lntrace-raw.jsonl"
+# Recorder output lives in the shared /logs bind-mount (see docker-compose.yml).
+LOG_DIR="$(cd "$(dirname "$0")" && pwd)/logs"
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -42,8 +43,9 @@ mine() {
 }
 
 truncate_raw_logs() {
-    for node in a b c d; do
-        docker exec "lntrace-cln-$node" truncate -s 0 "/root/.lightning/$RAW_FILE" 2>/dev/null || true
+    mkdir -p "$LOG_DIR"
+    for node in A B C D; do
+        truncate -s 0 "$LOG_DIR/node-$node-raw.jsonl" 2>/dev/null || true
     done
     echo "  Truncated raw logs on all nodes"
     sleep 1
@@ -52,12 +54,14 @@ truncate_raw_logs() {
 copy_scenario_fixtures() {
     local scenario_dir="$1"
     mkdir -p "$scenario_dir"
-    for node in a b c d; do
-        LABEL=$(echo "$node" | tr '[:lower:]' '[:upper:]')
-        SRC="lntrace-cln-$node:/root/.lightning/$RAW_FILE"
-        docker cp "$SRC" "$scenario_dir/node-$LABEL-raw.jsonl" 2>/dev/null \
-            && echo "  Copied node $LABEL" \
-            || echo "  WARNING: no raw log from node $LABEL"
+    for node in A B C D; do
+        SRC="$LOG_DIR/node-$node-raw.jsonl"
+        if [ -f "$SRC" ]; then
+            cp "$SRC" "$scenario_dir/node-$node-raw.jsonl"
+            echo "  Copied node $node"
+        else
+            echo "  WARNING: no raw log from node $node"
+        fi
     done
 }
 

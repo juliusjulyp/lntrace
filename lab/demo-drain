@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Drain B→C channel so payments from A must reroute via D.
+# Use after fund-and-pay.sh has set up channels.
+set -euo pipefail
+
+LCLI_B="docker exec lntrace-cln-b lightning-cli --network=regtest"
+LCLI_C="docker exec lntrace-cln-c lightning-cli --network=regtest"
+
+echo "Draining B→C channel (B pays C 900k sat)..."
+INVOICE=$($LCLI_C invoice 900000000 "drain-$(date +%s)" "drain B→C" | jq -r '.bolt11')
+RESULT=$($LCLI_B xpay "$INVOICE" 2>/dev/null) || true
+echo "$RESULT" | jq '.' 2>/dev/null || echo "$RESULT"
+
+echo ""
+echo "B→C liquidity after drain:"
+ID_C=$($LCLI_C getinfo | jq -r '.id')
+$LCLI_B listpeerchannels | jq '[.channels[] | select(.peer_id == "'"$ID_C"'")] | .[0] | {spendable_msat, receivable_msat}'

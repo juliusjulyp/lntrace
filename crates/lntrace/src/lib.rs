@@ -4,6 +4,7 @@ pub mod collector;
 pub mod envelope;
 pub mod event;
 pub mod explain;
+pub mod format;
 pub mod graph;
 pub mod source;
 pub mod types;
@@ -23,10 +24,15 @@ pub use types::*;
 pub use collector::{read_log, tail_log, LogHandle, LogWriter};
 
 // Re-export correlator public surface.
-pub use correlator::{correlate, Attempt, FailureInfo, HopFailure, Trace, TracedHop};
+pub use correlator::{
+    correlate, Attempt, AttemptOutcome, FailureInfo, HopFailure, Trace, TracedHop,
+};
 
 // Re-export explain.
 pub use explain::{explain, format_failure, FailureExplanation};
+
+// Re-export format.
+pub use format::format_sat_fee;
 
 // Re-export cause inference.
 pub use cause::{infer_cause, CauseRule, InferredCause};

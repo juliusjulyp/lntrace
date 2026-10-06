@@ -2,11 +2,15 @@
 source: adapters/cln/tests/golden_graph.rs
 expression: list
 ---
-- payment_hash: fe1983c344ecb7f83bd1d5a93ca156b93d4d556e4f9d596deef510b355783e91
+- payment_hash: deece99a74ff6804b2e014e0d50f873ae7661b416c963396a6267b08262b99be
+  amount_msat: 50000000
+  success: true
+  attempt_count: 1
+- payment_hash: 742214dc5ce398432cce78d851ffedde804784dbd164a68529e459dc227c942d
   amount_msat: 900000000
   success: true
   attempt_count: 1
-- payment_hash: d6e731d11f9f40b1d9564a04ab058a6c1f312926c77cfa938146bfa14dda0b0c
+- payment_hash: 2e1490ff04676db9fdbfedad9f1fd12e6d83530540b100712764d9761eaf69d1
   amount_msat: 50000000
   success: true
   attempt_count: 2

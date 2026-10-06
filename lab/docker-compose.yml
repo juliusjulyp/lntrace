@@ -49,10 +49,12 @@ services:
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
       - --plugin=/plugins/lntrace-cln-record
+      - --lntrace-log=/logs/node-A-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
       - cln-a-data:/root/.lightning
       - plugin-bin:/plugins:ro
+      - ./logs:/logs
     ports:
       - "9735:9735"
 
@@ -76,10 +78,12 @@ services:
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
       - --plugin=/plugins/lntrace-cln-record
+      - --lntrace-log=/logs/node-B-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
       - cln-b-data:/root/.lightning
       - plugin-bin:/plugins:ro
+      - ./logs:/logs
 
   # --- Node C (receiver) ---
   cln-c:
@@ -101,10 +105,12 @@ services:
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
       - --plugin=/plugins/lntrace-cln-record
+      - --lntrace-log=/logs/node-C-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
       - cln-c-data:/root/.lightning
       - plugin-bin:/plugins:ro
+      - ./logs:/logs
 
   # --- Node D (alternate intermediate) ---
   cln-d:
@@ -126,10 +132,12 @@ services:
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
       - --plugin=/plugins/lntrace-cln-record
+      - --lntrace-log=/logs/node-D-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
       - cln-d-data:/root/.lightning
       - plugin-bin:/plugins:ro
+      - ./logs:/logs
 
 volumes:
   bitcoind-data:

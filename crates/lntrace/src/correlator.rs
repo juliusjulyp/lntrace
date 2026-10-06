@@ -16,6 +16,18 @@ pub struct Trace {
     pub failure: Option<FailureInfo>,
 }
 
+/// The outcome of a single payment attempt (shard).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptOutcome {
+    Succeeded,
+    Failed,
+    /// Sender abandoned this shard (start with no end, payment has a final outcome).
+    Cancelled,
+    /// Started but no result yet (only seen during live tailing).
+    InFlight,
+}
+
 /// A single attempt (shard) within a payment. Keyed by (groupid, partid).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attempt {
@@ -24,11 +36,17 @@ pub struct Attempt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partid: Option<u64>,
     pub hops: Vec<TracedHop>,
-    pub success: bool,
+    pub outcome: AttemptOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
+}
+
+impl Attempt {
+    pub fn succeeded(&self) -> bool {
+        self.outcome == AttemptOutcome::Succeeded
+    }
 }
 
 /// A single hop in a correlated trace.
@@ -178,6 +196,7 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
     let mut attempts_by_shard: HashMap<ShardKey, &Vec<crate::Hop>> = HashMap::new();
     let mut results_by_shard: HashMap<ShardKey, ResultInfo> = HashMap::new();
     let mut saw_payment_sent = false;
+    let mut saw_payment_failed = false;
 
     for env in envs {
         match &env.event {
@@ -217,6 +236,9 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
             TraceEvent::PaymentSent { .. } => {
                 saw_payment_sent = true;
             }
+            TraceEvent::PaymentFailed { .. } => {
+                saw_payment_failed = true;
+            }
             _ => {}
         }
     }
@@ -242,8 +264,12 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
             continue;
         }
 
-        let attempt_success = result.map_or(false, |r| r.success);
-        if attempt_success {
+        let attempt_outcome = match result {
+            Some(r) if r.success => AttemptOutcome::Succeeded,
+            Some(_) => AttemptOutcome::Failed,
+            None => AttemptOutcome::InFlight, // tentative; reclassified below
+        };
+        if attempt_outcome == AttemptOutcome::Succeeded {
             any_success = true;
         }
 
@@ -255,7 +281,7 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
                 let mut hop_failure = None;
 
                 // Check if this hop is the failing one.
-                if let Some(ref res) = result {
+                if let Some(res) = result {
                     if !res.success {
                         if let (Some(ref erring_ch), Some(failcode)) =
                             (&res.erring_channel, res.failcode)
@@ -328,7 +354,7 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
             })
         });
 
-        if !attempt_success {
+        if attempt_outcome == AttemptOutcome::Failed {
             if let Some(ref f) = attempt_failure {
                 last_failure = Some(f.clone());
             }
@@ -338,10 +364,21 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
             groupid: key.0,
             partid: key.1,
             hops,
-            success: attempt_success,
+            outcome: attempt_outcome,
             failure: attempt_failure,
             duration_secs: result.and_then(|r| r.duration_secs),
         });
+    }
+
+    // Reclassify InFlight → Cancelled if the payment reached a final outcome.
+    let payment_has_final_outcome =
+        any_success || saw_payment_failed || !results_by_shard.is_empty();
+    if payment_has_final_outcome {
+        for attempt in &mut attempts {
+            if attempt.outcome == AttemptOutcome::InFlight {
+                attempt.outcome = AttemptOutcome::Cancelled;
+            }
+        }
     }
 
     // Overall failure: from the last failed attempt (if the payment didn't succeed).
@@ -524,7 +561,7 @@ mod tests {
         assert_eq!(t.attempts.len(), 1);
 
         let a = &t.attempts[0];
-        assert!(a.success);
+        assert_eq!(a.outcome, AttemptOutcome::Succeeded);
         assert_eq!(a.hops.len(), 2);
         assert_eq!(a.hops[0].node_id.0, "node_b");
         assert_eq!(a.hops[0].amount_msat, 50000501);
@@ -593,7 +630,7 @@ mod tests {
         assert_eq!(f.erring_node.as_ref().unwrap().0, "node_b");
 
         let a = &t.attempts[0];
-        assert!(!a.success);
+        assert_eq!(a.outcome, AttemptOutcome::Failed);
         // Hop 1 (100x2x0) should be flagged as failing.
         assert!(a.hops[0].failure.is_none());
         let hop_fail = a.hops[1].failure.as_ref().unwrap();
@@ -883,7 +920,7 @@ mod tests {
         // Attempt 1: failed
         let a0 = &t.attempts[0];
         assert_eq!(a0.groupid, Some(1));
-        assert!(!a0.success);
+        assert_eq!(a0.outcome, AttemptOutcome::Failed);
         assert!(a0.failure.is_some());
         assert_eq!(a0.hops.len(), 2);
         assert!(a0.hops[1].failure.is_some());
@@ -892,7 +929,7 @@ mod tests {
         // Attempt 2: succeeded on different route
         let a1 = &t.attempts[1];
         assert_eq!(a1.groupid, Some(2));
-        assert!(a1.success);
+        assert_eq!(a1.outcome, AttemptOutcome::Succeeded);
         assert!(a1.failure.is_none());
         assert_eq!(a1.hops.len(), 2);
         assert_eq!(a1.hops[1].node_id.0, "node_d"); // different route
@@ -1207,5 +1244,117 @@ mod tests {
             "expected insufficient liquidity but got: {cause}"
         );
         assert!(cause.contains("100000 msat"));
+    }
+
+    #[test]
+    fn unmatched_start_with_final_outcome_is_cancelled() {
+        // Shard 1 has start + result (failed), shard 2 has start only.
+        // Since shard 1 has a result, the payment has a final outcome,
+        // so shard 2 should be classified as Cancelled.
+        let envs = vec![
+            make_envelope(
+                "sender",
+                0,
+                1000,
+                TraceEvent::PaymentPathAttempt {
+                    payment_hash: "cancel_test".into(),
+                    groupid: Some(1),
+                    partid: Some(1),
+                    route: vec![Hop {
+                        node_id: NodeId("node_b".into()),
+                        channel: scid("100x1x0"),
+                        amount_msat: 50000,
+                        fee_msat: 0,
+                        cltv_expiry: 0,
+                        direction: None,
+                    }],
+                },
+            ),
+            make_envelope(
+                "sender",
+                1,
+                1001,
+                TraceEvent::PaymentPathAttempt {
+                    payment_hash: "cancel_test".into(),
+                    groupid: Some(1),
+                    partid: Some(2),
+                    route: vec![Hop {
+                        node_id: NodeId("node_c".into()),
+                        channel: scid("100x2x0"),
+                        amount_msat: 25000,
+                        fee_msat: 0,
+                        cltv_expiry: 0,
+                        direction: None,
+                    }],
+                },
+            ),
+            make_envelope(
+                "sender",
+                2,
+                1002,
+                TraceEvent::PaymentPathResult {
+                    payment_hash: "cancel_test".into(),
+                    groupid: Some(1),
+                    partid: Some(1),
+                    success: false,
+                    failcode: Some(4103),
+                    erring_node: Some(NodeId("node_b".into())),
+                    erring_channel: Some(scid("100x1x0")),
+                    error_message: None,
+                    duration_secs: Some(0.3),
+                    failed_direction: None,
+                },
+            ),
+        ];
+
+        let traces = correlate(&envs);
+        assert_eq!(traces.len(), 1);
+
+        let t = &traces[0];
+        assert_eq!(t.attempts.len(), 2);
+
+        let a1 = t.attempts.iter().find(|a| a.partid == Some(1)).unwrap();
+        assert_eq!(a1.outcome, AttemptOutcome::Failed);
+        assert!(a1.failure.is_some());
+
+        let a2 = t.attempts.iter().find(|a| a.partid == Some(2)).unwrap();
+        assert_eq!(a2.outcome, AttemptOutcome::Cancelled);
+        assert!(a2.failure.is_none());
+        assert!(a2.duration_secs.is_none());
+    }
+
+    #[test]
+    fn solo_start_without_result_is_in_flight() {
+        // A single PaymentPathAttempt with no result, no PaymentSent,
+        // no PaymentFailed. The payment has no final outcome yet.
+        let envs = vec![make_envelope(
+            "sender",
+            0,
+            1000,
+            TraceEvent::PaymentPathAttempt {
+                payment_hash: "inflight_test".into(),
+                groupid: Some(1),
+                partid: Some(1),
+                route: vec![Hop {
+                    node_id: NodeId("node_b".into()),
+                    channel: scid("100x1x0"),
+                    amount_msat: 50000,
+                    fee_msat: 0,
+                    cltv_expiry: 0,
+                    direction: None,
+                }],
+            },
+        )];
+
+        let traces = correlate(&envs);
+        assert_eq!(traces.len(), 1);
+
+        let t = &traces[0];
+        assert_eq!(t.attempts.len(), 1);
+
+        let a = &t.attempts[0];
+        assert_eq!(a.outcome, AttemptOutcome::InFlight);
+        assert!(a.failure.is_none());
+        assert!(a.duration_secs.is_none());
     }
 }

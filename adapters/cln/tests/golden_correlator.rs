@@ -144,7 +144,7 @@ fn golden_4node_success() {
         1,
         "success should have exactly 1 attempt"
     );
-    assert!(main_trace.attempts[0].success);
+    assert_eq!(main_trace.attempts[0].outcome, AttemptOutcome::Succeeded);
 
     insta::assert_yaml_snapshot!("4node_success_traces", traces);
 }
@@ -167,7 +167,7 @@ fn golden_4node_reroute() {
 
     // Attempt 0: failed via B with 0x1007.
     let a0 = &reroute_trace.attempts[0];
-    assert!(!a0.success);
+    assert_eq!(a0.outcome, AttemptOutcome::Failed);
     assert_eq!(a0.failure.as_ref().unwrap().failcode, 4103);
 
     // Attempt 0: failing hop should have inferred_cause from snapshot.
@@ -190,7 +190,7 @@ fn golden_4node_reroute() {
 
     // Attempt 1: succeeded via D.
     let a1 = &reroute_trace.attempts[1];
-    assert!(a1.success);
+    assert_eq!(a1.outcome, AttemptOutcome::Succeeded);
     // xpay retried — either different groupid or different partid.
     assert!(
         a0.groupid != a1.groupid || a0.partid != a1.partid,
@@ -272,10 +272,30 @@ fn golden_4node_allfail() {
     assert!(!fail_trace.success);
     assert!(fail_trace.failure.is_some());
 
-    // All attempts should have failed.
-    for attempt in &fail_trace.attempts {
-        assert!(!attempt.success, "all attempts should have failed");
-    }
+    // 4 failed + 1 cancelled = 5 attempts.
+    assert_eq!(fail_trace.attempts.len(), 5);
+    let failed = fail_trace
+        .attempts
+        .iter()
+        .filter(|a| a.outcome == AttemptOutcome::Failed)
+        .count();
+    let cancelled = fail_trace
+        .attempts
+        .iter()
+        .filter(|a| a.outcome == AttemptOutcome::Cancelled)
+        .count();
+    assert_eq!(failed, 4);
+    assert_eq!(cancelled, 1);
+
+    // Partid 2 is the cancelled one (start with no end).
+    let p2 = fail_trace
+        .attempts
+        .iter()
+        .find(|a| a.partid == Some(2))
+        .expect("expected partid 2");
+    assert_eq!(p2.outcome, AttemptOutcome::Cancelled);
+    assert!(p2.failure.is_none());
+    assert!(p2.duration_secs.is_none());
 
     insta::assert_yaml_snapshot!("4node_allfail_traces", traces);
 }

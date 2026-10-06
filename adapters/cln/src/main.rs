@@ -72,17 +72,12 @@ macro_rules! notification_handler {
 
 /// forward_event handler with poll trigger on local_failed.
 async fn on_forward_event(p: Plugin<State>, v: Value) -> Result<()> {
-    let is_local_failed = v["forward_event"]["status"]
-        .as_str()
-        .map_or(false, |s| s == "local_failed");
+    let is_local_failed = v["forward_event"]["status"].as_str() == Some("local_failed");
 
-    match translate::translate("forward_event", &v) {
-        Some(event) => {
-            if let Err(e) = p.state().emit(event).await {
-                eprintln!("lntrace: failed to write forward_event: {e}");
-            }
+    if let Some(event) = translate::translate("forward_event", &v) {
+        if let Err(e) = p.state().emit(event).await {
+            eprintln!("lntrace: failed to write forward_event: {e}");
         }
-        None => {}
     }
 
     // Trigger an immediate snapshot after local_failed to capture channel state.
@@ -154,11 +149,7 @@ async fn do_poll(
                 // Diff: only channels that changed.
                 channels
                     .iter()
-                    .filter(|ch| {
-                        previous
-                            .get(&ch.channel.scid)
-                            .map_or(true, |prev| prev != *ch)
-                    })
+                    .filter(|ch| previous.get(&ch.channel.scid) != Some(*ch))
                     .cloned()
                     .collect()
             };

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Send a payment from A to C (50k sat).
+# Use after fund-and-pay.sh has set up channels.
+set -euo pipefail
+
+LCLI_A="docker exec lntrace-cln-a lightning-cli --network=regtest"
+LCLI_C="docker exec lntrace-cln-c lightning-cli --network=regtest"
+
+AMOUNT=${1:-50000000}  # msat, default 50k sat
+
+echo "Creating invoice for $((AMOUNT / 1000)) sat on node C..."
+INVOICE=$($LCLI_C invoice "$AMOUNT" "demo-$(date +%s)" "demo payment" | jq -r '.bolt11')
+echo "Invoice: ${INVOICE:0:50}..."
+
+echo "Paying from A..."
+RESULT=$($LCLI_A xpay "$INVOICE" 2>/dev/null) || true
+echo "$RESULT" | jq '.' 2>/dev/null || echo "$RESULT"

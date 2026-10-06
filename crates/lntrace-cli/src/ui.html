@@ -43,6 +43,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
 .leg-line.l-green { background: #3fb950; }
 .leg-line.l-dim-red { background: #943533; }
 .leg-line.l-dim-amber { background: #946b13; }
+.leg-line.l-grey { background: #6e7681; }
+.detail-cancelled { color: #6e7681; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 #detail { flex: 0 0 auto; max-height: 45vh; border-top: 1px solid #30363d; padding: 16px 24px; overflow-y: auto; font-size: 15px; line-height: 1.6; }
 #detail h3 { font-size: 16px; margin-bottom: 10px; color: #58a6ff; }
 .detail-row { margin-bottom: 2px; }
@@ -64,7 +67,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
 <body>
 
 <div id="sidebar">
-  <h2>lntrace</h2>
+  <h2>lntrace <span id="live-indicator" style="display:none;font-size:12px;font-weight:normal;margin-left:8px"><span style="color:#3fb950;animation:pulse 2s infinite">&#9679;</span> live</span></h2>
   <div id="search-bar">
     <input id="search-input" type="text" placeholder="Paste a payment hash..." spellcheck="false" autocomplete="off">
     <select id="status-filter">
@@ -90,6 +93,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       <span class="leg"><span class="leg-line l-amber"></span> reached</span>
       <span class="leg"><span class="leg-line l-red"></span> failed</span>
       <span class="leg"><span class="leg-line l-green"></span> succeeded</span>
+      <span class="leg"><span class="leg-line l-grey"></span> cancelled</span>
       <span class="leg"><span class="leg-line l-dim-red"></span><span class="leg-line l-dim-amber" style="margin-left:2px"></span> prior attempt</span>
     </div>
   </div>
@@ -126,8 +130,22 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
 
   // Sender = node never appearing as a hop; receiver = last-hop destination
   const allNodeIds = graphData.nodes.map(n => n.id);
-  const sender = allNodeIds.find(id => !allHopNodeIds.has(id)) || allNodeIds[0];
-  const receiver = allNodeIds.find(id => receiverNodes.has(id) && id !== sender) || allNodeIds[allNodeIds.length - 1];
+  let sender = allNodeIds.find(id => !allHopNodeIds.has(id)) || allNodeIds[0];
+  let receiver = allNodeIds.find(id => receiverNodes.has(id) && id !== sender) || allNodeIds[allNodeIds.length - 1];
+
+  function recalcSenderReceiver() {
+    const hopIds = new Set();
+    const rcvrs = new Set();
+    for (const t of Object.values(traceCache)) {
+      for (const a of t.attempts) {
+        for (const h of a.hops) hopIds.add(h.node_id);
+        if (a.hops.length > 0) rcvrs.add(a.hops[a.hops.length - 1].node_id);
+      }
+    }
+    const ids = graphData.nodes.map(n => n.id);
+    sender = ids.find(id => !hopIds.has(id)) || ids[0];
+    receiver = ids.find(id => rcvrs.has(id) && id !== sender) || ids[ids.length - 1];
+  }
 
   function neighborsOf(nodeId) {
     const out = [];
@@ -164,7 +182,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
     return candidates[0] || sender;
   }
 
-  function alias(id) { return aliasMap[id] || id.slice(0, 8); }
+  function alias(id) { return aliasMap[id] || (id ? id.slice(0, 8) : '?'); }
 
   function formatMsat(str) {
     return str.replace(/(\d+)\s*msat/g, (_, d) =>
@@ -178,7 +196,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
   function formatSatFee(msat) {
     const sat = msat / 1000;
     if (sat === Math.floor(sat)) return sat.toLocaleString();
-    return '\u2248' + Math.ceil(sat).toLocaleString();
+    const rounded = Math.round(sat * 10) / 10;
+    if (rounded === Math.floor(rounded)) return '\u2248' + rounded.toLocaleString();
+    return '\u2248' + rounded.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
   }
 
   // Format inferred_cause into compact summary with numbers
@@ -304,6 +324,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       {
         selector: 'edge.fail-dim',
         style: { 'line-color': '#943533' }
+      },
+      {
+        selector: 'edge.cancelled',
+        style: { 'line-color': '#6e7681' }
+      },
+      {
+        selector: 'edge.cancelled-dim',
+        style: { 'line-color': '#484f58' }
+      },
+      {
+        selector: 'edge.inflight',
+        style: { 'line-color': '#d29922' }
       },
       {
         selector: '.hidden',
@@ -440,17 +472,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
   // --- Trace list ---
 
   const traceListEl = document.getElementById('trace-list');
-  traceList.forEach(entry => {
+
+  function buildTraceListItem(entry) {
     const t = traceCache[entry.payment_hash];
-    const ts = findSenderForTrace(t);
-    const tr = t.attempts.length > 0 && t.attempts[0].hops.length > 0
-      ? t.attempts[0].hops[t.attempts[0].hops.length - 1].node_id : receiver;
+    let ts, tr;
+    if (t) {
+      ts = findSenderForTrace(t);
+      tr = t.attempts.length > 0 && t.attempts[0].hops.length > 0
+        ? t.attempts[0].hops[t.attempts[0].hops.length - 1].node_id : receiver;
+    } else {
+      ts = sender;
+      tr = receiver;
+    }
     const amountSat = Math.floor(entry.amount_msat / 1000).toLocaleString();
-    const failedCount = t.attempts.filter(a => !a.success).length;
+    const failedCount = t ? t.attempts.filter(a => a.outcome === 'failed').length : 0;
+    const cancelledCount = t ? t.attempts.filter(a => a.outcome === 'cancelled').length : 0;
     let statusText;
     if (entry.success) {
-      statusText = failedCount > 0
-        ? `succeeded after ${failedCount} failed attempt${failedCount > 1 ? 's' : ''}`
+      const parts = [];
+      if (failedCount > 0) parts.push(`${failedCount} failed`);
+      if (cancelledCount > 0) parts.push(`${cancelledCount} cancelled`);
+      statusText = parts.length > 0
+        ? `succeeded after ${parts.join(', ')} attempt${failedCount + cancelledCount > 1 ? 's' : ''}`
         : 'succeeded';
     } else {
       statusText = `failed (${entry.attempt_count} attempt${entry.attempt_count > 1 ? 's' : ''})`;
@@ -465,8 +508,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       <div class="trace-meta"><span class="trace-status ${entry.success ? 'ok' : 'fail'}">${statusText}</span></div>
     `;
     div.addEventListener('click', () => selectTrace(entry.payment_hash));
-    traceListEl.appendChild(div);
+    return div;
+  }
+
+  function rebuildTraceList(entries) {
+    const selectedHash = document.querySelector('.trace-item.selected')?.dataset.hash;
+    traceListEl.innerHTML = '';
+    traceMap.clear();
+    entries.forEach(entry => {
+      traceMap.set(entry.payment_hash, entry);
+      traceListEl.appendChild(buildTraceListItem(entry));
+    });
+    if (entries.length === 0) {
+      traceListEl.innerHTML = '<div style="padding:20px;color:#8b949e;text-align:center">No traces found</div>';
+    }
+    // Restore selection highlight.
+    if (selectedHash) {
+      document.querySelectorAll('.trace-item').forEach(el => {
+        el.classList.toggle('selected', el.dataset.hash === selectedHash);
+      });
+    }
+    filterTraces();
+  }
+
+  // Initial build.
+  traceList.forEach(entry => {
+    traceMap.set(entry.payment_hash, entry);
+    traceListEl.appendChild(buildTraceListItem(entry));
   });
+
+  if (traceList.length === 0) {
+    traceListEl.innerHTML = '<div style="padding:20px;color:#8b949e;text-align:center">No traces found</div>';
+    document.getElementById('detail').innerHTML = '<h3 style="color:#8b949e">No traces loaded &mdash; check your log path</h3>';
+  }
 
   // --- Route focus ---
 
@@ -574,7 +648,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
           edge.addClass('fail');
           failed = true;
         } else {
-          edge.addClass(attempt.success ? 'success' : 'traversed');
+          edge.addClass(attempt.outcome === 'succeeded' ? 'success' : attempt.outcome === 'cancelled' ? 'cancelled' : 'traversed');
         }
         prev = hop.node_id;
       }
@@ -638,7 +712,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
   }
 
   function resetEdges() {
-    cy.edges().removeClass('success fail traversed success-dim fail-dim traversed-dim');
+    cy.edges().removeClass('success fail traversed cancelled inflight success-dim fail-dim traversed-dim cancelled-dim');
     cy.edges().forEach(e => { e.data('label', ''); });
     playbackLabels.clear();
   }
@@ -647,6 +721,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
     cy.edges('.traversed').removeClass('traversed').addClass('traversed-dim');
     cy.edges('.fail').removeClass('fail').addClass('fail-dim');
     cy.edges('.success').removeClass('success').addClass('success-dim');
+    cy.edges('.cancelled').removeClass('cancelled').addClass('cancelled-dim');
     cy.edges().forEach(e => { e.data('label', ''); });
     playbackLabels.clear();
   }
@@ -696,7 +771,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
           if (edge.length > 0) playbackLabels.add(edge[0].id());
         }
       } else {
-        edge.addClass(attempt.success ? 'success' : 'traversed');
+        edge.addClass(attempt.outcome === 'succeeded' ? 'success' : attempt.outcome === 'cancelled' ? 'cancelled' : 'traversed');
       }
       prevNodes.push(hop.node_id);
     }
@@ -717,8 +792,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       const eAlias = alias(erringNodeId);
       const fAlias = alias(failingHop.node_id);
       html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-fail">failed at ${eAlias} \u2192 ${fAlias}</span></h3>`;
-    } else if (attempt.success) {
+    } else if (attempt.outcome === 'succeeded') {
       html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-success">succeeded</span></h3>`;
+    } else if (attempt.outcome === 'cancelled') {
+      html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-cancelled">\u2298 cancelled by sender</span></h3>`;
+    } else if (attempt.outcome === 'in_flight') {
+      html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span style="color:#d29922">\u23f3 in flight</span></h3>`;
     } else {
       html += `<h3>Attempt ${idx + 1} of ${total} \u2014 <span class="detail-fail">failed</span></h3>`;
     }
@@ -745,8 +824,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       }
     } else if (attempt.failure) {
       html += `<div class="detail-row"><span class="detail-label">Error:</span> <span class="detail-fail">${attempt.failure.explanation}</span></div>`;
-    } else if (attempt.success) {
+    } else if (attempt.outcome === 'succeeded') {
       html += `<div class="detail-row"><span class="detail-success">Payment succeeded on this attempt.</span></div>`;
+    } else if (attempt.outcome === 'cancelled') {
+      html += `<div class="detail-row"><span class="detail-cancelled">\u2298 Cancelled by sender</span></div>`;
     }
 
     if (attempt.duration_secs) {
@@ -757,12 +838,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
 
   function buildSummaryPanel() {
     const t = currentTrace;
-    const failedCount = t.attempts.filter(a => !a.success).length;
+    const failedCount = t.attempts.filter(a => a.outcome === 'failed').length;
+    const cancelledCount = t.attempts.filter(a => a.outcome === 'cancelled').length;
 
     let header = '';
     if (t.success && failedCount > 0) {
-      const successAttempt = t.attempts.find(a => a.success);
-      const failedAttempt = t.attempts.find(a => !a.success);
+      const successAttempt = t.attempts.find(a => a.outcome === 'succeeded');
+      const failedAttempt = t.attempts.find(a => a.outcome === 'failed');
       let viaText = '';
       if (successAttempt && failedAttempt) {
         const failedHopIds = new Set(failedAttempt.hops.map(h => h.node_id));
@@ -784,11 +866,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       const s = findSenderForAttempt(a);
       const route = [alias(s), ...a.hops.map(h => alias(h.node_id))].join(' \u2192 ');
       const dur = a.duration_secs ? ' \u00b7 ' + a.duration_secs.toFixed(3) + 's' : '';
-      const icon = a.success ? '<span class="detail-success">\u2713</span>' : '<span class="detail-fail">\u2717</span>';
+      const icon = a.outcome === 'succeeded' ? '<span class="detail-success">\u2713</span>'
+        : a.outcome === 'cancelled' ? '<span class="detail-cancelled">\u2298</span>'
+        : a.outcome === 'in_flight' ? '<span style="color:#d29922">\u23f3</span>'
+        : '<span class="detail-fail">\u2717</span>';
 
       let info = '';
-      if (a.success) {
+      if (a.outcome === 'succeeded') {
         info = '<span class="detail-success">succeeded</span>';
+      } else if (a.outcome === 'cancelled') {
+        info = '<span class="detail-cancelled">cancelled by sender</span>';
+      } else if (a.outcome === 'in_flight') {
+        info = '<span style="color:#d29922">in flight</span>';
       } else {
         const fHop = a.hops.find(h => h.failure);
         if (fHop) {
@@ -816,7 +905,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
     html += '</table>';
 
     // Cost summary
-    const successAttempt = t.attempts.find(a => a.success);
+    const successAttempt = t.attempts.find(a => a.outcome === 'succeeded');
     if (successAttempt) {
       const deliveredMsat = successAttempt.hops.length > 0
         ? successAttempt.hops[successAttempt.hops.length - 1].amount_msat : 0;
@@ -829,7 +918,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       html += `Delivered ${delivered} sat \u00b7 fee ${fee} sat \u00b7 ${t.attempts.length} attempt${t.attempts.length !== 1 ? 's' : ''} \u00b7 ${totalDuration.toFixed(2)}s total`;
 
       // Show cost of the retry if the failed route would have been cheaper
-      const failedAttempt = t.attempts.find(a => !a.success);
+      const failedAttempt = t.attempts.find(a => a.outcome === 'failed');
       if (failedAttempt) {
         const failedFeeMsat = failedAttempt.hops.reduce((sum, h) => sum + (h.fee_msat || 0), 0);
         const extraMsat = successFeeMsat - failedFeeMsat;
@@ -878,6 +967,162 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monos
       updateControls();
     }
   }
+  // --- Live mode (WebSocket) ---
+
+  let ws = null;
+  let isLive = false;
+  let reconnectDelay = 1000;
+  let updateDebounceTimer = null;
+  let pendingUpdate = null;
+
+  function showLiveIndicator(on) {
+    const el = document.getElementById('live-indicator');
+    if (el) el.style.display = on ? 'inline' : 'none';
+  }
+
+  function handleUpdate(msg) {
+    // Debounce sidebar rebuilds to at most once per 500ms.
+    pendingUpdate = msg;
+    if (!updateDebounceTimer) {
+      updateDebounceTimer = setTimeout(() => {
+        updateDebounceTimer = null;
+        applyUpdate(pendingUpdate);
+        pendingUpdate = null;
+      }, 500);
+    }
+  }
+
+  async function applyUpdate(msg) {
+    const selectedHash = currentTrace?.payment_hash;
+
+    if (msg.topology_changed && msg.graph) {
+      graphData.nodes = msg.graph.nodes;
+      graphData.channels = msg.graph.channels;
+      msg.graph.nodes.forEach(n => { aliasMap[n.id] = n.alias || n.id.slice(0, 8) + '...'; });
+      rebuildCyGraph();
+    }
+
+    // Fetch full trace data for new or changed entries.
+    const toFetch = msg.traces.filter(e =>
+      !traceCache[e.payment_hash] || msg.changed.includes(e.payment_hash)
+    );
+    if (toFetch.length > 0) {
+      const results = await Promise.all(
+        toFetch.map(e => fetch('/api/traces/' + e.payment_hash).then(r => r.json()))
+      );
+      toFetch.forEach((e, i) => { traceCache[e.payment_hash] = results[i]; });
+    }
+    recalcSenderReceiver();
+    rebuildTraceList(msg.traces);
+    if (!currentTrace) {
+      detailEl.innerHTML = '<h3>Select a trace to begin</h3>';
+    }
+
+    if (selectedHash && msg.changed.includes(selectedHash)) {
+      currentTrace = traceCache[selectedHash];
+      resetEdges();
+      showFinalFrame(null);
+    }
+  }
+
+  function rebuildCyGraph() {
+    // Compute current element ids.
+    const existingNodeIds = new Set(cy.nodes().map(n => n.id()));
+    const existingEdgeIds = new Set(cy.edges().map(e => e.id()));
+
+    const newNodeIds = new Set(graphData.nodes.map(n => n.id));
+    const newEdgeIds = new Set(graphData.channels.map(ch => 'ch-' + ch.scid));
+
+    // Remove elements that no longer exist.
+    cy.nodes().forEach(n => { if (!newNodeIds.has(n.id())) n.remove(); });
+    cy.edges().forEach(e => { if (!newEdgeIds.has(e.id())) e.remove(); });
+
+    // Add new nodes.
+    graphData.nodes.forEach(n => {
+      if (!existingNodeIds.has(n.id)) {
+        const isExternal = n.instrumented === false;
+        const label = (n.alias || n.id.slice(0, 8)) + (isExternal ? '' : ' \u00b7 CLN');
+        cy.add({ data: { id: n.id, label: label }, classes: isExternal ? 'external' : '' });
+      }
+    });
+
+    // Add new channels.
+    graphData.channels.forEach(ch => {
+      const edgeId = 'ch-' + ch.scid;
+      if (!existingEdgeIds.has(edgeId)) {
+        cy.add({
+          data: {
+            id: edgeId,
+            source: ch.node_a,
+            target: ch.node_b,
+            label: '',
+            scid: ch.scid,
+            width: Math.max(2, Math.min(6, ch.capacity_sat / 500000))
+          }
+        });
+      }
+    });
+
+    // Re-run layout (positions are lost for new nodes).
+    cy.layout({
+      name: 'fcose',
+      animate: true,
+      animationDuration: 400,
+      quality: 'proof',
+      nodeSeparation: 120,
+      nodeRepulsion: 8000,
+      idealEdgeLength: 150,
+      gravity: 0.15,
+      padding: 50,
+      fit: true,
+      randomize: false
+    }).run();
+  }
+
+  async function handleSnapshot(msg) {
+    graphData.nodes = msg.graph.nodes;
+    graphData.channels = msg.graph.channels;
+    msg.graph.nodes.forEach(n => { aliasMap[n.id] = n.alias || n.id.slice(0, 8) + '...'; });
+    rebuildCyGraph();
+    // Fetch full trace data so buildTraceListItem can compute routes.
+    const toFetch = msg.traces.filter(e => !traceCache[e.payment_hash]);
+    if (toFetch.length > 0) {
+      const results = await Promise.all(
+        toFetch.map(e => fetch('/api/traces/' + e.payment_hash).then(r => r.json()))
+      );
+      toFetch.forEach((e, i) => { traceCache[e.payment_hash] = results[i]; });
+    }
+    recalcSenderReceiver();
+    rebuildTraceList(msg.traces);
+    if (!currentTrace) {
+      detailEl.innerHTML = '<h3>Select a trace to begin</h3>';
+    }
+  }
+
+  function connectWs() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws.onopen = () => {
+      isLive = true;
+      reconnectDelay = 1000;
+      showLiveIndicator(true);
+    };
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'snapshot') handleSnapshot(msg);
+      else if (msg.type === 'update') handleUpdate(msg);
+    };
+    ws.onclose = () => {
+      isLive = false;
+      showLiveIndicator(false);
+      setTimeout(connectWs, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+    ws.onerror = () => { ws.close(); };
+  }
+
+  // Attempt WebSocket connection (works in live mode, silently fails in static mode).
+  connectWs();
 })();
 </script>
 </body>

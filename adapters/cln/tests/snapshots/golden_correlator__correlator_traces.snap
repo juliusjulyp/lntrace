@@ -17,7 +17,7 @@ expression: traces
           amount_msat: 50000000
           fee_msat: 501
           confidence: exact
-      success: true
+      outcome: succeeded
       duration_secs: 0.601200752
   success: true
 - payment_hash: 91cd1c305ca24e94715d9bd7ee30a1ead05472e9df58554f4f07547e8549ce6c
@@ -30,7 +30,7 @@ expression: traces
           amount_msat: 900000000
           fee_msat: 0
           confidence: exact
-      success: true
+      outcome: succeeded
       duration_secs: 0.334275814
   success: true
 - payment_hash: 8bcff3b040216f715ba8af7980f0b818d4733cd209db330f9f3e44b287fb8e7e
@@ -51,7 +51,7 @@ expression: traces
           failure:
             sender_failcode: 4103
             local_failreason: WIRE_TEMPORARY_CHANNEL_FAILURE
-      success: false
+      outcome: failed
       failure:
         failcode: 4103
         erring_node: 038c933c07a19647d29e5c28675fcd8398c17c9cf2b9bf51c8f556ac868bb8b263

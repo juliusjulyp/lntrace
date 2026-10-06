@@ -85,7 +85,7 @@ pub fn build_graph(envelopes: &[Envelope], aliases: &HashMap<String, String>) ->
     for env in envelopes {
         if matches!(&env.event, TraceEvent::Snapshot { .. }) {
             let existing = latest_snapshots.get(env.node_id.0.as_str());
-            if existing.map_or(true, |prev| env.node_ts_ms >= prev.node_ts_ms) {
+            if existing.is_none_or(|prev| env.node_ts_ms >= prev.node_ts_ms) {
                 latest_snapshots.insert(&env.node_id.0, env);
             }
         }

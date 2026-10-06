@@ -118,9 +118,7 @@ fn pay_part_end_success() {
         .iter()
         .find(|e| {
             e.topic == "pay_part_end"
-                && e.payload["pay_part_end"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "success")
+                && (e.payload["pay_part_end"]["status"].as_str() == Some("success"))
         })
         .expect("no successful pay_part_end in node-A fixtures");
 
@@ -149,9 +147,7 @@ fn pay_part_end_failure_with_erring_hop() {
         .iter()
         .find(|e| {
             e.topic == "pay_part_end"
-                && e.payload["pay_part_end"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "failure")
+                && (e.payload["pay_part_end"]["status"].as_str() == Some("failure"))
         })
         .expect("no failed pay_part_end in node-A fixtures");
 
@@ -218,9 +214,7 @@ fn forward_event_settled_has_payment_hash() {
         .iter()
         .find(|e| {
             e.topic == "forward_event"
-                && e.payload["forward_event"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "settled")
+                && (e.payload["forward_event"]["status"].as_str() == Some("settled"))
         })
         .expect("no settled forward_event in node-B fixtures");
 
@@ -256,9 +250,7 @@ fn forward_event_local_failed_has_failcode() {
         .iter()
         .find(|e| {
             e.topic == "forward_event"
-                && e.payload["forward_event"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "local_failed")
+                && (e.payload["forward_event"]["status"].as_str() == Some("local_failed"))
         })
         .expect("no local_failed forward_event in node-B fixtures");
 
@@ -403,9 +395,7 @@ fn payment_hash_matches_across_nodes() {
         .iter()
         .find(|e| {
             e.topic == "forward_event"
-                && e.payload["forward_event"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "settled")
+                && (e.payload["forward_event"]["status"].as_str() == Some("settled"))
         })
         .unwrap();
     let b_event = translate(&b_settled.topic, &b_settled.payload).unwrap();
@@ -458,9 +448,7 @@ fn direction_invariant_route_hop_matches_failure() {
         .iter()
         .find(|e| {
             e.topic == "pay_part_end"
-                && e.payload["pay_part_end"]["status"]
-                    .as_str()
-                    .map_or(false, |s| s == "failure")
+                && (e.payload["pay_part_end"]["status"].as_str() == Some("failure"))
         })
         .expect("no failed pay_part_end in node-A fixtures");
     let ppe_event = translate(&ppe.topic, &ppe.payload).unwrap();

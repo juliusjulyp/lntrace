@@ -21,7 +21,8 @@ anyhow = "1"
 async-trait = "0.1"
 futures = "0.3"
 clap = { version = "4", features = ["derive"] }
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
+tokio-tungstenite = "0.26"
 cln-plugin = "0.7"
 cln-rpc = "0.7"

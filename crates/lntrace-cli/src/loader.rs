@@ -16,7 +16,7 @@ pub struct LoadResult {
 
 /// Load from a path.
 ///
-/// - If `path` is a directory: glob for `node-*-raw.jsonl`, translate via
+/// - If `path` is a directory: glob for `*.jsonl` files, translate via
 ///   the CLN adapter, and extract aliases from raw entries.
 /// - If `path` is a file: read as Envelope JSONL (aliases will be empty).
 pub async fn load(path: &Path) -> Result<LoadResult> {
@@ -33,34 +33,71 @@ pub async fn load(path: &Path) -> Result<LoadResult> {
 
 /// Raw recorder entry from CLN fixture files.
 #[derive(serde::Deserialize)]
-struct RawEntry {
-    topic: String,
-    payload: Value,
-    ts_ms: u64,
-    node_id: String,
+pub(crate) struct RawEntry {
+    pub topic: String,
+    pub payload: Value,
+    pub ts_ms: u64,
+    pub node_id: String,
     #[serde(default)]
-    alias: String,
+    pub alias: String,
+}
+
+/// Translate a single raw CLN entry into an Envelope. Returns `None` for
+/// unrecognised topics or entries that produce no events.
+pub(crate) fn translate_entry(entry: &RawEntry, seq: u64) -> Option<Envelope> {
+    if entry.topic == "listpeerchannels" {
+        let channels = translate_listpeerchannels_raw(&entry.payload);
+        if channels.is_empty() {
+            return None;
+        }
+        Some(Envelope {
+            schema_version: SCHEMA_VERSION,
+            node_id: NodeId(entry.node_id.clone()),
+            seq,
+            node_ts_ms: entry.ts_ms,
+            collector_ts_ms: Some(entry.ts_ms + 1),
+            event: TraceEvent::Snapshot { channels },
+        })
+    } else {
+        translate(&entry.topic, &entry.payload).map(|event| Envelope {
+            schema_version: SCHEMA_VERSION,
+            node_id: NodeId(entry.node_id.clone()),
+            seq,
+            node_ts_ms: entry.ts_ms,
+            collector_ts_ms: Some(entry.ts_ms + 1),
+            event,
+        })
+    }
+}
+
+/// Check whether a filename looks like a raw CLN JSONL file.
+///
+/// Accepts any `*.jsonl` file so the tailer works with both the
+/// recorder's default output (`lntrace-raw.jsonl`) and the fixture
+/// naming convention (`node-*-raw.jsonl`).
+pub(crate) fn is_raw_jsonl(name: &str) -> bool {
+    name.ends_with(".jsonl")
 }
 
 async fn load_directory(dir: &Path) -> Result<LoadResult> {
     let mut envelopes = Vec::new();
     let mut aliases = HashMap::new();
 
-    // Find all node-*-raw.jsonl files.
+    // Find all *.jsonl files.
     let mut paths: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("reading directory {}", dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name().and_then(|f| f.to_str()).map_or(false, |f| {
-                f.starts_with("node-") && f.ends_with("-raw.jsonl")
-            })
+            p.file_name()
+                .and_then(|f| f.to_str())
+                .is_some_and(is_raw_jsonl)
         })
         .collect();
     paths.sort();
 
     if paths.is_empty() {
-        anyhow::bail!("no node-*-raw.jsonl files found in {}", dir.display());
+        anyhow::bail!("no *.jsonl files found in {}", dir.display());
     }
 
     for path in &paths {
@@ -73,8 +110,17 @@ async fn load_directory(dir: &Path) -> Result<LoadResult> {
             if line.is_empty() {
                 continue;
             }
-            let entry: RawEntry = serde_json::from_str(line)
-                .with_context(|| format!("parsing line {} of {}", seq + 1, path.display()))?;
+            let entry: RawEntry = match serde_json::from_str(line) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!(
+                        "warning: skipping malformed line {} of {}: {e}",
+                        seq + 1,
+                        path.display()
+                    );
+                    continue;
+                }
+            };
 
             // Record alias.
             if !entry.alias.is_empty() {
@@ -84,27 +130,8 @@ async fn load_directory(dir: &Path) -> Result<LoadResult> {
             }
 
             // Translate.
-            if entry.topic == "listpeerchannels" {
-                let channels = translate_listpeerchannels_raw(&entry.payload);
-                if !channels.is_empty() {
-                    envelopes.push(Envelope {
-                        schema_version: SCHEMA_VERSION,
-                        node_id: NodeId(entry.node_id.clone()),
-                        seq: seq as u64,
-                        node_ts_ms: entry.ts_ms,
-                        collector_ts_ms: Some(entry.ts_ms + 1),
-                        event: TraceEvent::Snapshot { channels },
-                    });
-                }
-            } else if let Some(event) = translate(&entry.topic, &entry.payload) {
-                envelopes.push(Envelope {
-                    schema_version: SCHEMA_VERSION,
-                    node_id: NodeId(entry.node_id.clone()),
-                    seq: seq as u64,
-                    node_ts_ms: entry.ts_ms,
-                    collector_ts_ms: Some(entry.ts_ms + 1),
-                    event,
-                });
+            if let Some(envelope) = translate_entry(&entry, seq as u64) {
+                envelopes.push(envelope);
             }
         }
     }

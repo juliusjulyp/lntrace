@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Reset the lab: stop containers, remove volumes, clear logs.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_DIR="$SCRIPT_DIR/logs"
+
+echo "=== Stopping containers ==="
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" down -v 2>/dev/null || true
+
+echo "=== Clearing logs ==="
+rm -rf "$LOG_DIR"
+mkdir -p "$LOG_DIR"
+
+echo "=== Starting fresh ==="
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build
+
+echo "Done. Run fund-and-pay.sh to set up channels and payments."

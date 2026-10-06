@@ -15,6 +15,9 @@
 # Docker volumes (local state)
 lab/*-data/
 
+# Live mode logs from lab runs
+lab/logs/
+
 # OS
 .DS_Store
 Thumbs.db
