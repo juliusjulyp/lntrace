@@ -62,10 +62,19 @@ pub async fn run_state_manager(
         // Snapshot old state for diffing.
         let (old_fingerprints, old_node_ids, old_scids) = {
             let s = state.read().await;
-            let fps: HashSet<(String, usize, bool)> = s
+            let fps: HashSet<(String, usize, bool, Vec<lntrace::AttemptOutcome>)> = s
                 .traces
                 .iter()
-                .map(|t| (t.payment_hash.clone(), t.attempts.len(), t.success))
+                .map(|t| {
+                    let outcomes: Vec<lntrace::AttemptOutcome> =
+                        t.attempts.iter().map(|a| a.outcome).collect();
+                    (
+                        t.payment_hash.clone(),
+                        t.attempts.len(),
+                        t.success,
+                        outcomes,
+                    )
+                })
                 .collect();
             let nodes: HashSet<String> = s.graph.nodes.iter().map(|n| n.id.clone()).collect();
             let scids: HashSet<String> = s.graph.channels.iter().map(|c| c.scid.clone()).collect();
@@ -90,10 +99,13 @@ pub async fn run_state_manager(
                 .traces
                 .iter()
                 .filter(|t| {
+                    let outcomes: Vec<lntrace::AttemptOutcome> =
+                        t.attempts.iter().map(|a| a.outcome).collect();
                     !old_fingerprints.contains(&(
                         t.payment_hash.clone(),
                         t.attempts.len(),
                         t.success,
+                        outcomes,
                     ))
                 })
                 .map(|t| t.payment_hash.clone())
