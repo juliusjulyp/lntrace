@@ -53,9 +53,10 @@ enum Commands {
 
     /// Launch the trace graph UI.
     Ui {
-        /// Path to JSONL log file or directory of raw fixture files.
-        #[arg(short, long)]
-        log: PathBuf,
+        /// Paths to JSONL log files or directories of raw fixture files.
+        /// Can be repeated: --log dir1 --log dir2 --log file.jsonl
+        #[arg(short, long, required = true)]
+        log: Vec<PathBuf>,
 
         /// Port to serve on.
         #[arg(short, long, default_value = "8080")]
@@ -208,23 +209,23 @@ fn cmd_explain(code_str: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_ui(log: &Path, port: u16, follow: bool) -> Result<()> {
+async fn cmd_ui(logs: &[PathBuf], port: u16, follow: bool) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     if follow {
-        if !log.is_dir() {
-            anyhow::bail!("--follow requires a directory path, not a file");
+        // Collect directories for tailing (files are loaded once but not tailed).
+        let dirs: Vec<&Path> = logs
+            .iter()
+            .filter(|p| p.is_dir())
+            .map(|p| p.as_path())
+            .collect();
+        if dirs.is_empty() {
+            anyhow::bail!("--follow requires at least one directory path");
         }
 
         // In follow mode, start with whatever is already on disk (possibly nothing).
-        let result = match loader::load(log).await {
-            Ok(r) => r,
-            Err(_) => loader::LoadResult {
-                envelopes: Vec::new(),
-                aliases: std::collections::HashMap::new(),
-            },
-        };
+        let result = loader::load_many(logs).await;
         let traces = lntrace::correlate(&result.envelopes);
         let graph = lntrace::build_graph(&result.envelopes, &result.aliases);
         let trace_list = lntrace::build_trace_list(&traces);
@@ -249,25 +250,35 @@ async fn cmd_ui(log: &Path, port: u16, follow: bool) -> Result<()> {
         let (update_tx, _) = tokio::sync::broadcast::channel(64);
 
         // Compute initial file offsets so the tailer skips already-loaded data.
-        let initial_offsets: std::collections::HashMap<std::path::PathBuf, u64> =
-            std::fs::read_dir(log)?
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.file_name()
-                        .and_then(|f| f.to_str())
-                        .is_some_and(|n| n.ends_with(".jsonl"))
-                })
-                .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (p, m.len())))
-                .collect();
-
-        // Spawn directory tailer.
-        let dir = log.to_path_buf();
-        tokio::spawn(async move {
-            if let Err(e) = tailer::tail_directory(&dir, 250, tail_tx, initial_offsets).await {
-                eprintln!("tailer error: {e}");
+        // Scan all directories for .jsonl files.
+        let mut initial_offsets: std::collections::HashMap<std::path::PathBuf, u64> =
+            std::collections::HashMap::new();
+        for dir in &dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                        if let Ok(meta) = std::fs::metadata(&p) {
+                            initial_offsets.insert(p, meta.len());
+                        }
+                    }
+                }
             }
-        });
+        }
+
+        // Spawn a directory tailer for each directory.
+        for dir in dirs {
+            let dir = dir.to_path_buf();
+            let tx = tail_tx.clone();
+            let offsets = initial_offsets.clone();
+            tokio::spawn(async move {
+                if let Err(e) = tailer::tail_directory(&dir, 250, tx, offsets).await {
+                    eprintln!("tailer error: {e}");
+                }
+            });
+        }
+        // Drop our copy so the channel closes when all tailers stop.
+        drop(tail_tx);
 
         // Spawn state manager.
         let sm_state = live_state.clone();
@@ -285,7 +296,10 @@ async fn cmd_ui(log: &Path, port: u16, follow: bool) -> Result<()> {
         println!("Serving lntrace UI at http://localhost:{port} (live)");
         axum::serve(listener, app).await?;
     } else {
-        let result = loader::load(log).await?;
+        let result = loader::load_many(logs).await;
+        if result.envelopes.is_empty() {
+            anyhow::bail!("no events found in provided paths");
+        }
         let traces = lntrace::correlate(&result.envelopes);
         let graph = lntrace::build_graph(&result.envelopes, &result.aliases);
         let trace_list = lntrace::build_trace_list(&traces);
@@ -446,5 +460,96 @@ mod tests {
 
         // Cleanup.
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Regression test: when only an attempt's outcome changes (InFlight → Failed),
+    /// the fingerprint diff must detect the change and broadcast an update.
+    /// This is the exact scenario the `Vec<AttemptOutcome>` fingerprint field covers.
+    #[tokio::test]
+    async fn outcome_change_triggers_update() {
+        use crate::tailer::TailBatch;
+
+        // pay_part_end (failure) for the same payment_hash/groupid/partid as FIXTURE_LINE_1.
+        const FAILURE_LINE: &str = r#"{"alias":"node-A","node_id":"034b843630914ddc28d1c97d5cb3afe9bbdc39a986c60d70644b0e0a627fbfceb4","payload":{"pay_part_end":{"duration":0.5,"error_code":4103,"error_message":"temporary_channel_failure","groupid":7084061114156922794,"partid":1,"payment_hash":"4c47ded7ad81b259bf657ccaf5dc64aa558083eec60995694d05e6baacd7120b","status":"failure"}},"topic":"pay_part_end","ts_ms":1790981620117}"#;
+
+        // Load initial state from FIXTURE_LINE_1 (pay_part_start → InFlight attempt).
+        let entry1: loader::RawEntry = serde_json::from_str(FIXTURE_LINE_1).unwrap();
+        let env1 = loader::translate_entry(&entry1, 0).unwrap();
+        assert!(
+            matches!(&env1.event, lntrace::TraceEvent::PaymentPathAttempt { .. }),
+            "fixture should produce PaymentPathAttempt"
+        );
+
+        let envelopes = vec![env1];
+        let traces = lntrace::correlate(&envelopes);
+        assert_eq!(traces.len(), 1);
+        assert_eq!(
+            traces[0].attempts[0].outcome,
+            lntrace::AttemptOutcome::InFlight,
+            "initial attempt should be InFlight"
+        );
+
+        let graph = lntrace::build_graph(&envelopes, &std::collections::HashMap::new());
+        let trace_list = lntrace::build_trace_list(&traces);
+
+        let live_state = Arc::new(RwLock::new(live::LiveState {
+            envelopes,
+            aliases: std::collections::HashMap::new(),
+            graph,
+            traces,
+            trace_list,
+        }));
+
+        let (tail_tx, tail_rx) = tokio::sync::mpsc::channel(16);
+        let (update_tx, mut update_rx) = tokio::sync::broadcast::channel(16);
+
+        // Spawn state manager with short debounce.
+        let sm_state = live_state.clone();
+        tokio::spawn(async move {
+            live::run_state_manager(sm_state, tail_rx, update_tx, 50).await;
+        });
+
+        // Translate and send the failure line as a TailBatch.
+        let entry2: loader::RawEntry = serde_json::from_str(FAILURE_LINE).unwrap();
+        let env2 = loader::translate_entry(&entry2, 1).unwrap();
+
+        tail_tx
+            .send(TailBatch {
+                envelopes: vec![env2],
+                aliases: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Wait for the state manager to process and broadcast.
+        let update = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            update_rx.recv(),
+        )
+        .await
+        .expect("timed out waiting for state update")
+        .expect("broadcast recv error");
+
+        // The payment hash must appear in changed_hashes because the
+        // attempt outcome changed from InFlight to Failed.
+        let expected_hash = "4c47ded7ad81b259bf657ccaf5dc64aa558083eec60995694d05e6baacd7120b";
+        assert!(
+            update.changed_hashes.contains(&expected_hash.to_string()),
+            "outcome-only change (InFlight→Failed) should be detected; changed: {:?}",
+            update.changed_hashes
+        );
+
+        // Verify the attempt is now Failed.
+        let s = live_state.read().await;
+        let trace = s
+            .traces
+            .iter()
+            .find(|t| t.payment_hash == expected_hash)
+            .expect("trace should exist");
+        assert_eq!(
+            trace.attempts[0].outcome,
+            lntrace::AttemptOutcome::Failed,
+            "attempt should now be Failed"
+        );
     }
 }

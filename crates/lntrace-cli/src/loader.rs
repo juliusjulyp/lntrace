@@ -31,7 +31,33 @@ pub async fn load(path: &Path) -> Result<LoadResult> {
     }
 }
 
-/// Raw recorder entry from CLN fixture files.
+/// Load and merge from multiple paths (files and/or directories).
+///
+/// Errors on individual paths are logged and skipped so the UI can start
+/// with partial data (e.g. some nodes haven't written anything yet).
+pub async fn load_many(paths: &[std::path::PathBuf]) -> LoadResult {
+    let mut combined = LoadResult {
+        envelopes: Vec::new(),
+        aliases: HashMap::new(),
+    };
+    for path in paths {
+        match load(path).await {
+            Ok(r) => {
+                combined.envelopes.extend(r.envelopes);
+                for (k, v) in r.aliases {
+                    combined.aliases.entry(k).or_insert(v);
+                }
+            }
+            Err(e) => {
+                eprintln!("warning: skipping {}: {e}", path.display());
+            }
+        }
+    }
+    combined.envelopes.sort_by_key(|e| e.node_ts_ms);
+    combined
+}
+
+/// Raw CLN plugin entry from fixture files.
 #[derive(serde::Deserialize)]
 pub(crate) struct RawEntry {
     pub topic: String,
@@ -73,7 +99,7 @@ pub(crate) fn translate_entry(entry: &RawEntry, seq: u64) -> Option<Envelope> {
 /// Check whether a filename looks like a raw CLN JSONL file.
 ///
 /// Accepts any `*.jsonl` file so the tailer works with both the
-/// recorder's default output (`lntrace-raw.jsonl`) and the fixture
+/// plugin's default output (`lntrace-raw.jsonl`) and the fixture
 /// naming convention (`node-*-raw.jsonl`).
 pub(crate) fn is_raw_jsonl(name: &str) -> bool {
     name.ends_with(".jsonl")
