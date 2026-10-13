@@ -48,13 +48,12 @@ fi
 # --- 2. Start CLN (sender) ---
 mkdir -p "$CLN_DIR"
 
-# Path to the lntrace CLN recorder plugin (Stage 0).
-# After Stage 1, switch to the lntrace-cln adapter plugin.
-PLUGIN_PATH="$(cd "$(dirname "$0")/.." && pwd)/target/debug/lntrace-cln-recorder"
+# Path to the lntrace CLN plugin.
+PLUGIN_PATH="$(cd "$(dirname "$0")/.." && pwd)/target/debug/lntrace-cln"
 
 if [ ! -f "$PLUGIN_PATH" ]; then
-    echo "Building lntrace-cln-recorder..."
-    (cd "$(dirname "$0")/.." && cargo build -p lntrace-cln --bin lntrace-cln-recorder)
+    echo "Building lntrace-cln..."
+    (cd "$(dirname "$0")/.." && cargo build -p lntrace-cln --bin lntrace-cln)
 fi
 
 if ! pgrep -f "lightningd.*$CLN_DIR" > /dev/null; then
@@ -81,15 +80,14 @@ echo "CLN is ready."
 # TODO: Start LDK Node instances. Options:
 #   a) Build a minimal LDK Node binary in the lab/ directory.
 #   b) Use ldk-node's example or ldk-server when available.
-#   c) For Stage 0-1 (CLN-only), skip this and use a second CLN node
+#   c) For CLN-only testing, skip this and use a second CLN node
 #      or test with a two-node CLN setup.
 
 echo ""
 echo "=== Lab running ==="
 echo "  bitcoind RPC: localhost:18443"
 echo "  CLN socket:   $CLN_DIR/$NETWORK/lightning-rpc"
-echo "  Raw log:      $CLN_DIR/lntrace-raw.jsonl (recorder)"
-echo "  Event log:    events.jsonl (adapter)"
+echo "  Log:          $CLN_DIR/lntrace-raw.jsonl"
 echo ""
 echo "Next steps:"
 echo "  1. Open channels:  $LCLI fundchannel <peer_id> <amount>"

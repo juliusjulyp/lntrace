@@ -48,7 +48,7 @@ services:
       - --bitcoin-rpcport=18443
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
-      - --plugin=/plugins/lntrace-cln-record
+      - --plugin=/plugins/lntrace-cln
       - --lntrace-log=/logs/node-A-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
@@ -77,7 +77,7 @@ services:
       - --bitcoin-rpcport=18443
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
-      - --plugin=/plugins/lntrace-cln-record
+      - --plugin=/plugins/lntrace-cln
       - --lntrace-log=/logs/node-B-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
@@ -104,7 +104,7 @@ services:
       - --bitcoin-rpcport=18443
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
-      - --plugin=/plugins/lntrace-cln-record
+      - --plugin=/plugins/lntrace-cln
       - --lntrace-log=/logs/node-C-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
@@ -131,7 +131,7 @@ services:
       - --bitcoin-rpcport=18443
       - --log-level=debug
       - --log-file=/root/.lightning/debug.log
-      - --plugin=/plugins/lntrace-cln-record
+      - --plugin=/plugins/lntrace-cln
       - --lntrace-log=/logs/node-D-raw.jsonl
       - --addr=0.0.0.0:9735
     volumes:
