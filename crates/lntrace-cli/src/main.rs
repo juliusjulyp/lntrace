@@ -522,13 +522,10 @@ mod tests {
             .unwrap();
 
         // Wait for the state manager to process and broadcast.
-        let update = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            update_rx.recv(),
-        )
-        .await
-        .expect("timed out waiting for state update")
-        .expect("broadcast recv error");
+        let update = tokio::time::timeout(std::time::Duration::from_secs(5), update_rx.recv())
+            .await
+            .expect("timed out waiting for state update")
+            .expect("broadcast recv error");
 
         // The payment hash must appear in changed_hashes because the
         // attempt outcome changed from InFlight to Failed.

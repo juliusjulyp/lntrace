@@ -38,7 +38,6 @@ Every event is wrapped in an Envelope carrying: the observing node ID, a per-nod
 | `ChannelPending` | Funding transaction broadcast | all |
 | `ChannelReady` | Channel confirmed and usable | all |
 | `ChannelClosed` | Channel closed (cooperative, force, or breach) | all |
-| `BalanceUpdate` | Local/remote balance change | polled (all) |
 | `ForwardEvent` | HTLC forward offered, settled, failed, or local_failed | CLN, LND |
 | `PaymentSent` | Outbound payment completed | all |
 | `PaymentFailed` | Outbound payment failed | all |
@@ -72,8 +71,8 @@ This is the key insight that makes `lntrace` more than a log viewer. BOLT 4's `t
 
 **Where real enrichment comes from.** To determine *why* the forward failed, `lntrace` polls `listpeerchannels` on the failing node to get channel state snapshots: `spendable_msat`, `receivable_msat`, `htlc_maximum_msat`, channel status. When the correlator sees a `temporary_channel_failure` and the channel snapshot shows `spendable_msat < htlc_amount`, it can report: "hop B->C failed: `temporary_channel_failure` — actual cause: insufficient liquidity (spendable 100,000 msat, HTLC requested 50,000,000 msat)."
 
-- **Stage 1 (done):** Forward_event merge — the correlator matches the sender's generic error with the intermediate node's `local_failed` forward, confirming the failing hop.
-- **Stage 2 (planned):** `listpeerchannels` polling via `poll_state()` — the CLN adapter periodically snapshots channel state. Snapshots are attached to traces as `Inferred` confidence.
+- **(done)** Forward_event merge — the correlator matches the sender's generic error with the intermediate node's `local_failed` forward, confirming the failing hop.
+- **(done)** `listpeerchannels` polling — the CLN plugin periodically snapshots channel state. The correlator uses snapshots to infer the actual cause of `temporary_channel_failure` (insufficient liquidity, HTLC minimum, etc.).
 - LND's link-fail events carry a `failure_detail` (e.g. "INSUFFICIENT_BALANCE") which provides richer data than CLN's `forward_event`.
 
 This enrichment requires the failing node to be instrumented. LDK Node intermediates currently emit nothing on a failed forward.
@@ -86,7 +85,7 @@ This enrichment requires the failing node to be instrumented. LDK Node intermedi
 lntrace-cli (binary)
   -> lntrace
 
-lntrace-cln (adapter + recorder)
+lntrace-cln (CLN plugin)
   -> lntrace
   -> cln-plugin 0.7, cln-rpc 0.7, sha2
 ```
@@ -97,22 +96,22 @@ The `lntrace` library crate contains: core types, collector, correlator, and BOL
 
 ## Roadmap
 
-### v0.1 — Core trace pipeline (in progress)
+### v0.1 — Core trace pipeline (done)
 
 The minimum viable tool: capture events across a multi-hop network, correlate them into traces, enrich failures with data from the failing node, and display the result in a graph UI.
 
 - [x] Upgrade CLN lab to v26.06.8 with xpay
 - [x] 3-node lab (A→B→C) with drained-channel failure scenario
-- [x] Recapture fixtures with the recorder (one file per node)
+- [x] Recapture fixtures with the plugin (one file per node)
 - [x] CLN adapter: typed xpay deserialization (`cln-rpc 0.7`), `sha256(preimage)` for `invoice_payment`
 - [x] `build_trace()` with hop reconstruction and cross-node forward_event merge
 - [x] Per-shard attempt pairing by `(groupid, partid)` — retries produce separate attempts, not merged routes
 - [x] Failing hop match on scid + direction + node_id verification
 - [x] Cause rules module: infer actual cause of `temporary_channel_failure` from channel snapshots
 - [x] `listpeerchannels` polling via `poll_state()` for liquidity enrichment — periodic + on-demand after `local_failed`
-- [x] 32 tests: 19 library (correlator + cause + BOLT 4) + 12 adapter (translate + cross-node hash match) + 1 golden (insta)
-- [ ] Recapture fixtures with polling-enabled recorder for enrichment golden test
-- [ ] Graph UI: `lntrace ui --log` (replay) and `lntrace ui --follow` (live)
+- [x] 49 tests: library (correlator, cause, BOLT 4, collector, graph), adapter (translate, fixtures, golden correlator/graph), CLI (live WebSocket, fingerprint regression)
+- [x] Recapture fixtures with polling-enabled plugin for enrichment golden test
+- [x] Graph UI: `lntrace ui --log` (replay) and `lntrace ui --follow` (live)
 - [ ] Demo script and recording
 
 **Done when:** a drained-channel payment in the live lab shows up in the graph with the failing hop highlighted and the real cause in the side panel, and the same flow replays identically from the recorded log.
@@ -207,8 +206,8 @@ The scenario runner is planned for v0.3.
 
 ## Security details
 
-- **Observe-only adapters.** The CLN adapter and (planned) LND adapter never call payment, channel, or wallet RPCs. They subscribe to notifications passively.
-  - CLN adapter does not use the `htlc_accepted` hook (which would block HTLC processing).
+- **Observe-only adapters.** Adapters subscribe to notifications and use read-only RPCs (`getinfo`, `listpeerchannels`) but never initiate payments or modify channels or wallets.
+  - CLN plugin does not use the `htlc_accepted` hook (which would block HTLC processing).
   - LND adapter will connect with `readonly.macaroon` (pending verification for router RPCs).
   - The lab scripts (`fund-and-pay.sh`) do create wallets, fund channels, and send payments — these are test-harness actions, not part of the `lntrace` tool itself.
 - **Local-first.** The collector binds to localhost by default. Remote exposure is explicit opt-in.
@@ -220,12 +219,13 @@ The scenario runner is planned for v0.3.
 Adapters are the easiest place to start. Each adapter implements the `EventSource` trait:
 
 ```rust
-#[async_trait]
 pub trait EventSource: Send + Sync + 'static {
     fn capabilities(&self) -> Capabilities;
-    async fn subscribe(&self) -> Result<Pin<Box<dyn Stream<Item = TraceEvent> + Send>>>;
-    async fn poll_state(&self) -> Result<Vec<TraceEvent>>;
+    fn subscribe(&self) -> impl Future<Output = Result<mpsc::Receiver<Envelope>>> + Send;
+    fn poll_state(&self) -> impl Future<Output = Result<Vec<ChannelSnapshot>>> + Send;
 }
 ```
+
+This trait uses RPITIT (return-position `impl Trait` in trait), so it cannot be used as `Box<dyn EventSource>`. When multiple adapters coexist, use an enum over the concrete types.
 
 Declare your capabilities, and add recorded fixture events for conformance tests.

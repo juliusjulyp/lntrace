@@ -1,6 +1,6 @@
 # lntrace
 
-> Your Lightning node tells you *that* a payment failed. lntrace shows you *where* and *why*.
+> Your Lightning node tells you *that* a payment failed. lntrace shows you *where* and *why*. The ability to trace what happens under the hood.
 
 [![CI](https://github.com/juliusjulyp/lntrace/actions/workflows/ci.yml/badge.svg)](https://github.com/juliusjulyp/lntrace/actions/workflows/ci.yml)
 
@@ -11,13 +11,13 @@ payment, and shows the failing hop, the likely cause with real numbers, and
 any retries — including what they cost.
 
 ![A payment that failed at B→C and succeeded on retry via D](docs/lntrace-reroute.png)
-*Attempt 1 failed at node-B → node-C: 35,694 sat available, 50,000 needed. The retry via node-D succeeded and cost ≈55 sat more.*
+*Attempt 1 failed at node-B → node-C: 35,694 sat available, 50,000 needed. The retry via node-D succeeded and cost ≈54.5 sat more.*
 
 Currently supports CLN, with LDK and LND adapters planned.
 
 ---
 
-## Try it in 30 seconds (no nodes needed)
+## Try it in 30 seconds (no nodes needed) but you can also use it in your application if need be instructions have also been provided
 
 ```bash
 git clone https://github.com/juliusjulyp/lntrace
@@ -27,27 +27,37 @@ cargo run -p lntrace-cli -- ui --log fixtures/4node-reroute/
 # open http://localhost:8080
 ```
 
-This runs entirely from recorded data — no Docker, no nodes. Click a trace in the sidebar, then Play to step through the payment.
+---
+
+## Requirements
+
+- **Rust 1.75+** (stable). The codebase uses return-position `impl Trait` in traits (RPITIT), stabilised in 1.75.
+- **CLN with xpay.** Payments must go through xpay to provide per-path route data (`pay_part_start`/`pay_part_end`). Tested on CLN v26.06.8.
+- **Docker note:** a plugin built on the host may not run inside a CLN container if the C library versions differ. Until static release binaries exist, build the plugin inside a container that uses the same base image as your node (see `lab/Dockerfile.plugin` for an example).
 
 ---
 
 ## How it works
 
 ```
-CLN node A ──→ lntrace-cln plugin ──→ events.jsonl ──┐
-CLN node B ──→ lntrace-cln plugin ──→ events.jsonl ──┤
-CLN node D ──→ lntrace-cln plugin ──→ events.jsonl ──┤
-                                                      ▼
+CLN node 1 ──→ lntrace-cln plugin ──→ raw JSONL ──┐
+CLN node 2 ──→ lntrace-cln plugin ──→ raw JSONL ──┤
+     ⋮                                              │
+CLN node N ──→ lntrace-cln plugin ──→ raw JSONL ──┤
+                                                    ▼
+                                              translator
+                                           (raw → TraceEvent)
+                                                    │
                                               correlator
-                                                      │
-                                              traces + graph
-                                                      │
-                                          ┌───────────┴───────────┐
-                                          ▼                       ▼
-                                    CLI (replay)            UI (browser)
+                                                    │
+                                            traces + graph
+                                                    │
+                                        ┌───────────┴───────────┐
+                                        ▼                       ▼
+                                  CLI (replay)            UI (browser)
 ```
 
-1. **Adapters** run as plugins on each node, subscribing to notifications passively and writing JSONL event logs. They never call payment, channel, or wallet RPCs.
+1. **The plugin** (`lntrace-cln`) runs on each node, subscribing to notifications and writing raw JSONL logs. It uses read-only RPCs (`getinfo`, `listpeerchannels`) but never initiates payments or modifies channels or wallets.
 2. **The correlator** pairs each path attempt with its result by `(groupid, partid)`, merges forward events across nodes, and infers the actual cause of failures from channel state snapshots.
 3. **The CLI and UI** consume the correlated traces. The replay UI renders the payment graph with route focus, step/play animation, and a summary panel showing the cost of retries.
 
@@ -69,16 +79,28 @@ Then either start lightningd with the plugin:
 lightningd --plugin=/path/to/target/release/lntrace-cln
 ```
 
-Or load it at runtime:
+Or load it at runtime (options must be passed as key-value pairs):
 
 ```bash
 lightning-cli plugin start /path/to/target/release/lntrace-cln
+lightning-cli -k plugin subcommand=start plugin=/path/to/lntrace-cln lntrace-dir=/shared/logs
 ```
 
-The plugin writes `events.jsonl` in the node's lightning directory. To view traces from one or more nodes, point `ui` at a directory containing the log files:
+By default the plugin writes `lntrace-raw.jsonl` in the node's data directory. For multi-node setups, use `--lntrace-dir` to write all logs into one shared directory (each file is named by the node's alias):
 
 ```bash
-cargo run -p lntrace-cli -- ui --log /path/to/logs/
+lightningd --plugin=.../lntrace-cln --lntrace-dir=/shared/logs/
+```
+
+Or set an explicit path per node with `--lntrace-log=/path/to/file.jsonl`.
+
+**Note:** with `--lntrace-dir`, filenames are the node's alias verbatim (e.g. `node-A.jsonl`). If two nodes share an alias, their logs will collide. Use `--lntrace-log` with distinct paths per node in that case.
+
+To view traces, point the UI at the log directory (repeatable for multiple directories):
+
+```bash
+cargo run -p lntrace-cli -- ui --log /shared/logs/
+cargo run -p lntrace-cli -- ui --log /shared/logs/ --follow   # live mode
 ```
 
 ---
@@ -114,14 +136,15 @@ cargo run -p lntrace-cli -- ui --log fixtures/4node-reroute/
 
 ## Status
 
-All tests pass. The replay UI, CLN adapter, correlator, and CLI are functional.
+ The replay UI, CLN plugin, correlator, and CLI are functional.
 
 | Component | Status | Description |
 |---|---|---|
 | `lntrace` library | done | Types, JSONL collector, correlator, graph builder, BOLT 4 decoder |
 | CLI | done | `events`, `trace`, `replay`, `explain`, `ui` subcommands |
 | Replay UI | done | Cytoscape.js graph with fcose layout, route focus, search/filter, step/play animation, summary panel |
-| CLN adapter | done | Typed xpay deserialization, listpeerchannels polling, recorder plugin |
+| CLN plugin | done | Records notifications and `listpeerchannels` snapshots as raw JSONL |
+| CLN translation | done | Typed deserialization via `cln-rpc`, run centrally by the CLI |
 | Correlator | done | Per-shard attempt pairing, direction-aware hop matching, cause inference from channel snapshots |
 | Docker lab | done | 4-node diamond CLN v26.06.8 lab with success, reroute, and total-failure scenarios |
 
@@ -131,7 +154,7 @@ All tests pass. The replay UI, CLN adapter, correlator, and CLI are functional.
 
 | Milestone | Focus | Status |
 |---|---|---|
-| v0.1 | Core trace pipeline: CLN adapter, correlator, replay UI. Remaining: live mode (`ui --follow`) | in progress |
+| v0.1 | Core trace pipeline: CLN plugin, correlator, replay UI, live mode (`ui --follow`) | done |
 | v0.2 | LDK adapter, MPP shard trees, OTel export, shareable traces | planned |
 | v0.3 | LND adapter, scenario runner | planned |
 | Future | Counterfactual replay, BOLT 12 tracing, channel jamming detection, LSPS | research |
@@ -140,7 +163,7 @@ All tests pass. The replay UI, CLN adapter, correlator, and CLI are functional.
 
 ## Known limitations
 
-- **Onion routing limits visibility.** You only see hops on nodes you run lntrace on. If two of four hops are uninstrumented, the trace has gaps.
+- **Visibility depends on which nodes you instrument.** For payments sent from an instrumented node, you see the full route and the failing hop, because the sender's node reports them. The cause of a failure can only be inferred if the failing node is also instrumented. For payments you only forward or receive, you see your own hop.
 - **Causes are inferred, not reported.** When a hop fails with `temporary_channel_failure`, lntrace checks the failing node's channel state and infers the most likely cause (insufficient liquidity, HTLC minimum, too many HTLCs). The inference is usually right, but it's not authoritative.
 - **CLN only (for now).** LDK and LND adapters are on the roadmap. LDK Node doesn't yet expose the events needed for full trace reconstruction.
 
@@ -174,6 +197,16 @@ bash fund-and-pay.sh          # opens channels, runs 3 scenarios, captures fixtu
 docker compose down -v
 ```
 
+For interactive testing after `fund-and-pay.sh`:
+
+```bash
+bash demo-pay                 # send a 50k sat payment from A to C
+bash demo-drain               # drain B→C so payments reroute via D
+bash demo-reset               # stop containers, remove volumes, clear logs
+```
+
+Note: `fund-and-pay.sh` leaves B→C and D→C drained after running all three scenarios. Use `demo-reset` to start fresh.
+
 D's fees are raised so xpay prefers B when it has liquidity. Three scenarios are captured:
 
 1. **Success** (`fixtures/4node-success/`): A pays C via B.
@@ -190,7 +223,7 @@ lntrace/
     lntrace/               # library: types, collector, correlator, graph, BOLT 4 decoder
     lntrace-cli/           # CLI binary + graph UI server
   adapters/
-    cln/                   # CLN plugin + recorder
+    cln/                   # CLN plugin
   lab/                     # Docker regtest lab
   fixtures/                # recorded CLN notification data from regtest
 ```
@@ -199,17 +232,16 @@ lntrace/
 
 ## Security and privacy
 
-- **Observe-only adapters.** The CLN adapter subscribes to notifications passively — no payment, channel, or wallet RPCs. Lab scripts (`fund-and-pay.sh`) do send payments, but those are test-harness actions, not part of the tool.
+- **Observe-only plugin.** The CLN plugin subscribes to notifications and uses read-only RPCs (`getinfo`, `listpeerchannels`) but never initiates payments or modifies channels or wallets. Like any CLN plugin, it runs with full access to the node's RPC socket; review the source if in doubt. Lab scripts (`fund-and-pay.sh`) do send payments, but those are test-harness actions, not part of the tool.
 - **Local-first.** The UI server binds to localhost by default.
 
 ---
 
 ## Contributing
 
-The adapter interface is the `EventSource` trait in `crates/lntrace/src/source.rs`. To add support for a new implementation (LDK, LND), implement the three methods — `capabilities`, `subscribe`, `poll_state` — and write a binary that runs as a plugin or sidecar for that node.
+The CLN path has two parts: a **recorder** that writes raw notifications as JSONL (`adapters/cln/src/recorder.rs`), and a **translation module** that converts raw events into `TraceEvent` values (`adapters/cln/src/translate.rs`). The recorder runs as a CLN plugin on the node; translation runs centrally in the CLI when loading logs.
+
+To add support for a new implementation (LDK, LND), write a recorder that captures the node's native events as JSONL, and a translation function from those events to `TraceEvent`. The `EventSource` trait in `crates/lntrace/src/source.rs` is the planned interface for push-based adapters that stream events directly instead of going through files.
 
 ---
 
-## License
-
-Dual-licensed under MIT or Apache-2.0, at your option.

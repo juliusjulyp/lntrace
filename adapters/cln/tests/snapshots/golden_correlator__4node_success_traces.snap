@@ -2,21 +2,21 @@
 source: adapters/cln/tests/golden_correlator.rs
 expression: traces
 ---
-- payment_hash: deece99a74ff6804b2e014e0d50f873ae7661b416c963396a6267b08262b99be
+- payment_hash: afc4423a2fc48de8cd19fa69de43d69859f563b45f50f6f04a3b7ef4d56c3da5
   attempts:
-    - groupid: 4702820952695159826
+    - groupid: 7753908591284904243
       partid: 1
       hops:
         - index: 0
-          node_id: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
+          node_id: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
           amount_msat: 50000501
           fee_msat: 0
           confidence: exact
         - index: 1
-          node_id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
+          node_id: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
           amount_msat: 50000000
           fee_msat: 501
           confidence: exact
       outcome: succeeded
-      duration_secs: 0.65793247
+      duration_secs: 0.43403161
   success: true

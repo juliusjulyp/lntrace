@@ -227,7 +227,7 @@ pub fn translate_listpeerchannels(resp: &ListpeerchannelsResponse) -> Vec<Channe
         .collect()
 }
 
-/// Translate a raw `listpeerchannels` JSON payload (as stored by the recorder)
+/// Translate a raw `listpeerchannels` JSON payload (as stored by the plugin)
 /// into a vec of `ChannelSnapshot`. Returns empty vec on deserialization failure.
 ///
 /// This wraps `translate_listpeerchannels` so callers don't need `cln_rpc` types.

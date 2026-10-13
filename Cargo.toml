@@ -26,3 +26,4 @@ tower-http = { version = "0.6", features = ["cors"] }
 tokio-tungstenite = "0.26"
 cln-plugin = "0.7"
 cln-rpc = "0.7"
+log = "0.4"

@@ -1,43 +1,13 @@
 //! Integration tests for CLN notification -> TraceEvent translation.
 //!
-//! Reads raw recorder fixtures from `fixtures/node-{A,B,C}-raw.jsonl`,
+//! Reads raw plugin fixtures from `fixtures/node-{A,B,C}-raw.jsonl`,
 //! translates each notification, and verifies the output against known values.
+
+mod fixtures;
+use fixtures::*;
 
 use lntrace::*;
 use lntrace_cln::translate::translate;
-use serde_json::Value;
-use std::path::Path;
-
-/// Raw recorder entry: {topic, payload, ts_ms, node_id, alias}
-#[derive(serde::Deserialize)]
-struct RawEntry {
-    topic: String,
-    payload: Value,
-    ts_ms: u64,
-    #[allow(dead_code)]
-    node_id: String,
-    #[allow(dead_code)]
-    alias: String,
-}
-
-fn load_fixtures(name: &str) -> Vec<RawEntry> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../fixtures/{name}"));
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
-    content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).expect("malformed raw fixture line"))
-        .collect()
-}
-
-fn load_all_fixtures() -> Vec<RawEntry> {
-    let mut all = Vec::new();
-    for name in ["node-A-raw.jsonl", "node-B-raw.jsonl", "node-C-raw.jsonl"] {
-        all.extend(load_fixtures(name));
-    }
-    all
-}
 
 // --- Bulk translation ---
 

@@ -3,40 +3,40 @@ source: adapters/cln/tests/golden_graph.rs
 expression: graph
 ---
 nodes:
-  - id: 021c444a94d762e244adca668882a1086b069a13081aeebd7a2208685df1a3440b
-    alias: node-D
-    instrumented: true
-  - id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
+  - id: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
     alias: node-C
     instrumented: true
-  - id: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
+  - id: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
     alias: node-B
     instrumented: true
-  - id: 03cd77e34ab8b06b560cf37c0e4418a2c52c6c02d433ee04d6a6f876058e2942ac
+  - id: 0351b4d3c9ed7ad8489096a1fcfc50d2365ee49d6ee8637ba4635fdbe488ac7658
+    alias: node-D
+    instrumented: true
+  - id: 0357d5237a0021f901e481992b7ad467ffcd0e9838c5f7f5d11ef1df05d197b523
     alias: node-A
     instrumented: true
 channels:
   - scid: 108x1x0
-    node_a: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
-    node_b: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
+    node_a: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
+    node_b: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
     capacity_sat: 1000000
     a_local_msat: 950000000
     b_local_msat: 50000000
   - scid: 108x2x0
-    node_a: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
-    node_b: 03cd77e34ab8b06b560cf37c0e4418a2c52c6c02d433ee04d6a6f876058e2942ac
+    node_a: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
+    node_b: 0357d5237a0021f901e481992b7ad467ffcd0e9838c5f7f5d11ef1df05d197b523
     capacity_sat: 1000000
     a_local_msat: 50000501
     b_local_msat: 949999499
   - scid: 111x1x0
-    node_a: 021c444a94d762e244adca668882a1086b069a13081aeebd7a2208685df1a3440b
-    node_b: 03cd77e34ab8b06b560cf37c0e4418a2c52c6c02d433ee04d6a6f876058e2942ac
+    node_a: 0351b4d3c9ed7ad8489096a1fcfc50d2365ee49d6ee8637ba4635fdbe488ac7658
+    node_b: 0357d5237a0021f901e481992b7ad467ffcd0e9838c5f7f5d11ef1df05d197b523
     capacity_sat: 1000000
     a_local_msat: 50055000
     b_local_msat: 949945000
   - scid: 111x2x0
-    node_a: 021c444a94d762e244adca668882a1086b069a13081aeebd7a2208685df1a3440b
-    node_b: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
+    node_a: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
+    node_b: 0351b4d3c9ed7ad8489096a1fcfc50d2365ee49d6ee8637ba4635fdbe488ac7658
     capacity_sat: 1000000
-    a_local_msat: 950000000
-    b_local_msat: 50000000
+    a_local_msat: 50000000
+    b_local_msat: 950000000

@@ -2,18 +2,18 @@
 source: adapters/cln/tests/golden_graph.rs
 expression: reroute_trace
 ---
-payment_hash: 2e1490ff04676db9fdbfedad9f1fd12e6d83530540b100712764d9761eaf69d1
+payment_hash: 9c946a71b5278f560474be805cd0fcf14d869bb7ba2946ea788ef3fbd81058f4
 attempts:
-  - groupid: 6632833030942812446
+  - groupid: 3271676411819435826
     partid: 1
     hops:
       - index: 0
-        node_id: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
+        node_id: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
         amount_msat: 50000501
         fee_msat: 0
         confidence: exact
       - index: 1
-        node_id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
+        node_id: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
         amount_msat: 50000000
         fee_msat: 501
         confidence: exact
@@ -24,22 +24,22 @@ attempts:
     outcome: failed
     failure:
       failcode: 4103
-      erring_node: 03254abc9958483f562ae812ccb4b2295aa0af045a3a15cce15c3166c9ee940324
+      erring_node: 034ba4a663b354ca1db86929deea342ad32461d0740aaacd49cc1e8f70602d21d5
       explanation: "The channel cannot currently fulfill the HTLC. This code is overloaded: it covers insufficient liquidity, too many in-flight HTLCs, HTLC minimum not met, or a channel that is being closed."
-    duration_secs: 0.430389706
-  - groupid: 6632833030942812446
+    duration_secs: 0.352399339
+  - groupid: 3271676411819435826
     partid: 2
     hops:
       - index: 0
-        node_id: 021c444a94d762e244adca668882a1086b069a13081aeebd7a2208685df1a3440b
+        node_id: 0351b4d3c9ed7ad8489096a1fcfc50d2365ee49d6ee8637ba4635fdbe488ac7658
         amount_msat: 50055000
         fee_msat: 0
         confidence: exact
       - index: 1
-        node_id: 02e747d156b30dc76ffb2987decc124a4df6f87b2c775489015a0b9bd1532a7585
+        node_id: 0322930886c8ceb7c43e7cfc9e3092cd363c6e5915a5abc77c970ef0d30e07908d
         amount_msat: 50000000
         fee_msat: 55000
         confidence: exact
     outcome: succeeded
-    duration_secs: 0.609048999
+    duration_secs: 0.466221197
 success: true
