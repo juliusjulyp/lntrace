@@ -21,7 +21,7 @@ pub use source::EventSource;
 pub use types::*;
 
 // Re-export collector.
-pub use collector::{read_log, tail_log, LogHandle, LogWriter};
+pub use collector::{read_log, LogHandle, LogWriter};
 
 // Re-export correlator public surface.
 pub use correlator::{

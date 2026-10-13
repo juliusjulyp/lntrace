@@ -38,11 +38,6 @@ impl Envelope {
             event,
         }
     }
-
-    /// Stamp the collector receive time.
-    pub fn stamp_collector_ts(&mut self) {
-        self.collector_ts_ms = Some(now_ms());
-    }
 }
 
 pub fn now_ms() -> u64 {

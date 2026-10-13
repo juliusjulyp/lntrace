@@ -8,7 +8,5 @@ description = "Lightning Network payment tracing library: types, collector, corr
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }

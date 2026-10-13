@@ -17,7 +17,7 @@ pub struct Trace {
 }
 
 /// The outcome of a single payment attempt (shard).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptOutcome {
     Succeeded,
@@ -41,12 +41,6 @@ pub struct Attempt {
     pub failure: Option<FailureInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
-}
-
-impl Attempt {
-    pub fn succeeded(&self) -> bool {
-        self.outcome == AttemptOutcome::Succeeded
-    }
 }
 
 /// A single hop in a correlated trace.
@@ -215,7 +209,6 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
                 failcode,
                 erring_node,
                 erring_channel,
-                error_message,
                 duration_secs,
                 failed_direction,
                 ..
@@ -227,7 +220,6 @@ fn build_trace(payment_hash: &str, envs: &[&Envelope], snapshots: &SnapshotIndex
                         failcode: *failcode,
                         erring_node: erring_node.clone(),
                         erring_channel: erring_channel.clone(),
-                        error_message: error_message.clone(),
                         duration_secs: *duration_secs,
                         failed_direction: *failed_direction,
                     },
@@ -420,8 +412,6 @@ struct ResultInfo {
     failcode: Option<u16>,
     erring_node: Option<NodeId>,
     erring_channel: Option<crate::ChannelId>,
-    #[allow(dead_code)]
-    error_message: Option<String>,
     duration_secs: Option<f64>,
     failed_direction: Option<u32>,
 }

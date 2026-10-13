@@ -1,8 +1,6 @@
 use crate::capability::Capabilities;
 use crate::envelope::Envelope;
-use async_trait::async_trait;
-use futures::stream::Stream;
-use std::pin::Pin;
+use crate::event::ChannelSnapshot;
 
 /// Adapter interface. Each Lightning implementation provides one.
 ///
@@ -11,9 +9,18 @@ use std::pin::Pin;
 /// They assign monotonic per-node sequence numbers and declare their
 /// [`Capabilities`] so the correlator and UI know what data to expect.
 ///
-/// Adapters are observe-only: they never call payment, channel, or
-/// wallet methods on the node.
-#[async_trait]
+/// Adapters are observe-only: they use read-only RPCs (e.g.
+/// `getinfo`, `listpeerchannels`) but never initiate payments or
+/// modify channels or wallets.
+///
+/// # Dispatch
+///
+/// This trait uses RPITIT (return-position `impl Trait` in trait) for
+/// its async methods. That means it **cannot be used as a trait
+/// object** (`Box<dyn EventSource>` won't compile). When multiple
+/// adapters coexist (CLN + LDK + LND), use an enum over the concrete
+/// types and delegate each method. This avoids the `async-trait`
+/// allocation overhead while keeping dispatch straightforward.
 pub trait EventSource: Send + Sync + 'static {
     /// Declare what this adapter can provide.
     fn capabilities(&self) -> Capabilities;
@@ -23,12 +30,15 @@ pub trait EventSource: Send + Sync + 'static {
     /// Each [`Envelope`] carries a per-node sequence number assigned
     /// by the adapter. The stream runs until the adapter disconnects
     /// or the node shuts down.
-    async fn subscribe(&self) -> anyhow::Result<Pin<Box<dyn Stream<Item = Envelope> + Send>>>;
+    fn subscribe(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<tokio::sync::mpsc::Receiver<Envelope>>> + Send;
 
-    /// Poll current channel/balance state.
+    /// Poll current channel state.
     ///
-    /// Returns `Snapshot` and/or `BalanceUpdate` events reflecting
-    /// the node's current state. Called on adapter connect and
-    /// periodically thereafter.
-    async fn poll_state(&self) -> anyhow::Result<Vec<Envelope>>;
+    /// Returns a snapshot of all channels reflecting the node's current
+    /// state. Called on adapter connect and periodically thereafter.
+    fn poll_state(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<ChannelSnapshot>>> + Send;
 }

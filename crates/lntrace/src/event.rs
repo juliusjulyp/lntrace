@@ -33,13 +33,6 @@ pub enum TraceEvent {
         reason: CloseReason,
     },
 
-    /// Local/remote balance change (polled).
-    BalanceUpdate {
-        channel: ChannelId,
-        local_msat: u64,
-        remote_msat: u64,
-    },
-
     /// HTLC forward event at an intermediate node.
     ForwardEvent {
         in_channel: ChannelId,

@@ -77,50 +77,6 @@ pub async fn read_log(path: &Path) -> Result<Vec<Envelope>> {
     Ok(envelopes)
 }
 
-/// Stream envelopes from a JSONL log file, tailing for new entries.
-///
-/// Reads raw bytes and only parses complete lines (terminated by `\n`).
-/// Partial lines at EOF are kept in a buffer and prepended to the next read,
-/// so a half-written line from a concurrent writer is never treated as malformed.
-pub async fn tail_log(path: &Path, tx: mpsc::Sender<Envelope>) -> Result<()> {
-    use tokio::io::AsyncReadExt;
-
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut buf = Vec::with_capacity(8192);
-    let mut tmp = [0u8; 4096];
-
-    loop {
-        let n = file.read(&mut tmp).await?;
-        if n == 0 {
-            // No new data — wait briefly and retry (tail behaviour).
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            continue;
-        }
-        buf.extend_from_slice(&tmp[..n]);
-
-        // Process every complete line (up to last \n).
-        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
-            let line = String::from_utf8_lossy(&line_bytes);
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<Envelope>(line) {
-                Ok(env) => {
-                    if tx.send(env).await.is_err() {
-                        return Ok(());
-                    }
-                }
-                Err(e) => {
-                    eprintln!("warning: skipping malformed line in tail: {e}");
-                }
-            }
-        }
-        // Anything remaining in buf is a partial line — keep for next read.
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,63 +128,6 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
 
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn tail_buffers_partial_lines() {
-        let dir = std::env::temp_dir().join(format!("lntrace-tail-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("partial.jsonl");
-
-        let full_line = envelope_line("ccc");
-
-        // Write just the first half (no newline).
-        let split = full_line.len() / 2;
-        {
-            let mut f = std::fs::File::create(&path).unwrap();
-            f.write_all(&full_line.as_bytes()[..split]).unwrap();
-            f.flush().unwrap();
-        }
-
-        let (tx, mut rx) = mpsc::channel::<Envelope>(16);
-        let tail_path = path.clone();
-        let handle = tokio::spawn(async move {
-            let _ = tail_log(&tail_path, tx).await;
-        });
-
-        // Give the tailer time to read the partial line.
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        // No event should have arrived — the line is incomplete.
-        assert!(
-            rx.try_recv().is_err(),
-            "partial line should not produce an event"
-        );
-
-        // Now append the rest of the line + newline.
-        {
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&path)
-                .unwrap();
-            f.write_all(&full_line.as_bytes()[split..]).unwrap();
-            f.write_all(b"\n").unwrap();
-            f.flush().unwrap();
-        }
-
-        // The tailer should now emit exactly one event.
-        let env = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-            .await
-            .expect("timed out waiting for event")
-            .expect("channel closed");
-
-        match &env.event {
-            TraceEvent::PaymentSent { payment_hash, .. } => assert_eq!(payment_hash, "ccc"),
-            other => panic!("unexpected event: {other:?}"),
-        }
-
-        handle.abort();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
